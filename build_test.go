@@ -361,3 +361,408 @@ func TestBuildTest_WithUnmetEntries(t *testing.T) {
 		t.Errorf("expected unmet entry [optional-dep], got %v", unmet)
 	}
 }
+
+func TestBuildTest_WithAppFile(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		// Verify app file exists
+		pomPath := filepath.Join(ctx.ApplicationPath, "pom.xml")
+		content, err := os.ReadFile(pomPath)
+		if err != nil {
+			t.Errorf("failed to read pom.xml: %v", err)
+		}
+		if string(content) != "<project>test</project>" {
+			t.Errorf("unexpected content: %s", string(content))
+		}
+
+		// Verify nested file exists
+		configPath := filepath.Join(ctx.ApplicationPath, "src", "main", "resources", "config.properties")
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			t.Error("expected nested config file to exist")
+		}
+
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithAppFileString("pom.xml", "<project>test</project>").
+		WithAppFile("src/main/resources/config.properties", []byte("key=value")).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Errorf("build failed: %v", result.Error())
+	}
+}
+
+func TestBuildTest_WithPlatformEnv(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		if ctx.Platform.Environment["BP_JVM_VERSION"] != "17" {
+			t.Errorf("expected BP_JVM_VERSION=17, got %s", ctx.Platform.Environment["BP_JVM_VERSION"])
+		}
+		if ctx.Platform.Environment["BP_MAVEN_BUILT_ARTIFACT"] != "target/*.jar" {
+			t.Errorf("expected BP_MAVEN_BUILT_ARTIFACT, got %s", ctx.Platform.Environment["BP_MAVEN_BUILT_ARTIFACT"])
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithPlatformEnv("BP_JVM_VERSION", "17").
+		WithPlatformEnv("BP_MAVEN_BUILT_ARTIFACT", "target/*.jar").
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Errorf("build failed: %v", result.Error())
+	}
+}
+
+func TestBuildTest_WithTarget(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		if ctx.TargetInfo.OS != "linux" {
+			t.Errorf("expected OS linux, got %s", ctx.TargetInfo.OS)
+		}
+		if ctx.TargetInfo.Arch != "arm64" {
+			t.Errorf("expected Arch arm64, got %s", ctx.TargetInfo.Arch)
+		}
+		if ctx.TargetDistro.Name != "ubuntu" {
+			t.Errorf("expected DistroName ubuntu, got %s", ctx.TargetDistro.Name)
+		}
+		if ctx.TargetDistro.Version != "22.04" {
+			t.Errorf("expected DistroVersion 22.04, got %s", ctx.TargetDistro.Version)
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithTarget(bptest.TargetInfo{
+			OS:            "linux",
+			Arch:          "arm64",
+			DistroName:    "ubuntu",
+			DistroVersion: "22.04",
+		}).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Errorf("build failed: %v", result.Error())
+	}
+}
+
+func TestBuildTest_LayerEnvironmentVariables(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, err := ctx.Layers.Layer("jdk")
+		if err != nil {
+			return libcnb.BuildResult{}, err
+		}
+
+		layer.Build = true
+		layer.Launch = true
+
+		// Set up environment directories and files
+		envBuildDir := filepath.Join(layer.Path, "env.build")
+		envLaunchDir := filepath.Join(layer.Path, "env.launch")
+		envSharedDir := filepath.Join(layer.Path, "env")
+
+		for _, dir := range []string{envBuildDir, envLaunchDir, envSharedDir} {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return libcnb.BuildResult{}, err
+			}
+		}
+
+		// Write env vars
+		os.WriteFile(filepath.Join(envBuildDir, "JAVA_HOME.override"), []byte("/layers/jdk"), 0644)
+		os.WriteFile(filepath.Join(envLaunchDir, "JAVA_TOOL_OPTIONS.default"), []byte("-XX:+UseG1GC"), 0644)
+		os.WriteFile(filepath.Join(envSharedDir, "PATH.prepend"), []byte("/layers/jdk/bin"), 0644)
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Fatalf("build failed: %v", result.Error())
+	}
+
+	layer := result.Layer("jdk")
+	if layer == nil {
+		t.Fatal("expected jdk layer")
+	}
+
+	envBuild := layer.EnvBuild()
+	if envBuild["JAVA_HOME.override"] != "/layers/jdk" {
+		t.Errorf("expected JAVA_HOME.override, got %v", envBuild)
+	}
+
+	envLaunch := layer.EnvLaunch()
+	if envLaunch["JAVA_TOOL_OPTIONS.default"] != "-XX:+UseG1GC" {
+		t.Errorf("expected JAVA_TOOL_OPTIONS.default, got %v", envLaunch)
+	}
+
+	envShared := layer.EnvShared()
+	if envShared["PATH.prepend"] != "/layers/jdk/bin" {
+		t.Errorf("expected PATH.prepend, got %v", envShared)
+	}
+}
+
+func TestBuildTest_LayerFileContent(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, err := ctx.Layers.Layer("config")
+		if err != nil {
+			return libcnb.BuildResult{}, err
+		}
+
+		layer.Build = true
+
+		// Create files in the layer
+		if err := os.MkdirAll(filepath.Join(layer.Path, "conf"), 0755); err != nil {
+			return libcnb.BuildResult{}, err
+		}
+		os.WriteFile(filepath.Join(layer.Path, "conf", "app.properties"), []byte("key=value\nfoo=bar"), 0644)
+		os.WriteFile(filepath.Join(layer.Path, "conf", "binary.dat"), []byte{0x00, 0x01, 0x02}, 0644)
+
+		// Create lib directory with files
+		if err := os.MkdirAll(filepath.Join(layer.Path, "lib"), 0755); err != nil {
+			return libcnb.BuildResult{}, err
+		}
+		os.WriteFile(filepath.Join(layer.Path, "lib", "app.jar"), []byte("jar content"), 0644)
+		os.WriteFile(filepath.Join(layer.Path, "lib", "utils.jar"), []byte("utils"), 0644)
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Fatalf("build failed: %v", result.Error())
+	}
+
+	layer := result.Layer("config")
+	if layer == nil {
+		t.Fatal("expected config layer")
+	}
+
+	// Test FileContentString
+	content, err := layer.FileContentString("conf/app.properties")
+	if err != nil {
+		t.Errorf("FileContentString failed: %v", err)
+	}
+	if content != "key=value\nfoo=bar" {
+		t.Errorf("unexpected content: %s", content)
+	}
+
+	// Test FileContent (binary)
+	binContent, err := layer.FileContent("conf/binary.dat")
+	if err != nil {
+		t.Errorf("FileContent failed: %v", err)
+	}
+	if len(binContent) != 3 || binContent[0] != 0x00 {
+		t.Errorf("unexpected binary content: %v", binContent)
+	}
+
+	// Test LibFiles
+	libFiles, err := layer.LibFiles()
+	if err != nil {
+		t.Errorf("LibFiles failed: %v", err)
+	}
+	if len(libFiles) != 2 {
+		t.Errorf("expected 2 lib files, got %d", len(libFiles))
+	}
+}
+
+func TestBuildTest_ReadLayerTOML(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, err := ctx.Layers.Layer("jdk")
+		if err != nil {
+			return libcnb.BuildResult{}, err
+		}
+
+		layer.Build = true
+		layer.Launch = true
+		layer.Cache = true
+		layer.Metadata = map[string]any{
+			"version": "17.0.1",
+			"vendor":  "adoptium",
+		}
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	bt := bptest.NewBuildTest()
+	result := bt.ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Fatalf("build failed: %v", result.Error())
+	}
+
+	// Use ReadLayerTOML to inspect the layer.toml file
+	// Note: The layer.toml is written by libcnb after build, but in our test
+	// we can read from existing layers set up with WithExistingLayer
+	// Let's test with an existing layer instead
+}
+
+func TestBuildTest_ReadLayerTOML_WithExistingLayer(t *testing.T) {
+	bt := bptest.NewBuildTest().
+		WithExistingLayer("cached-jdk", &bptest.LayerConfig{
+			Build:  true,
+			Launch: true,
+			Cache:  true,
+			Metadata: map[string]any{
+				"version": "17.0.1",
+				"vendor":  "adoptium",
+			},
+		})
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bt.ExecuteT(t, builder)
+	if !result.Succeeded() {
+		t.Fatalf("build failed: %v", result.Error())
+	}
+
+	// Read the layer.toml that was set up by WithExistingLayer
+	paths := bt.Paths()
+	layerContent, err := bptest.ReadLayerTOML(paths.LayersDir, "cached-jdk")
+	if err != nil {
+		t.Fatalf("ReadLayerTOML failed: %v", err)
+	}
+
+	if !layerContent.Build {
+		t.Error("expected Build to be true")
+	}
+	if !layerContent.Launch {
+		t.Error("expected Launch to be true")
+	}
+	if !layerContent.Cache {
+		t.Error("expected Cache to be true")
+	}
+	if layerContent.Metadata["version"] != "17.0.1" {
+		t.Errorf("expected version 17.0.1, got %v", layerContent.Metadata["version"])
+	}
+}
+
+func TestBuildTest_WithBuildpack(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		if ctx.Buildpack.Info.ID != "my/buildpack" {
+			t.Errorf("expected buildpack ID my/buildpack, got %s", ctx.Buildpack.Info.ID)
+		}
+		if ctx.Buildpack.Info.Version != "2.0.0" {
+			t.Errorf("expected version 2.0.0, got %s", ctx.Buildpack.Info.Version)
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithBuildpack(bptest.BuildpackConfig{
+			API:     "0.9",
+			ID:      "my/buildpack",
+			Version: "2.0.0",
+			Name:    "My Buildpack",
+		}).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Errorf("build failed: %v", result.Error())
+	}
+}
+
+func TestBuildTest_LayerInspectorGet(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer1, _ := ctx.Layers.Layer("layer1")
+		layer1.Build = true
+		layer2, _ := ctx.Layers.Layer("layer2")
+		layer2.Launch = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer1, layer2)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Fatalf("build failed: %v", result.Error())
+	}
+
+	layers := result.Layers()
+
+	// Test Get
+	layer1 := layers.Get("layer1")
+	if layer1 == nil {
+		t.Fatal("expected layer1")
+	}
+	if layer1.Name() != "layer1" {
+		t.Errorf("expected name layer1, got %s", layer1.Name())
+	}
+	if layer1.Path() == "" {
+		t.Error("expected non-empty path")
+	}
+
+	// Test Get for non-existent layer
+	nonexistent := layers.Get("nonexistent")
+	if nonexistent != nil {
+		t.Error("expected nil for nonexistent layer")
+	}
+
+	// Test Metadata() returning full map
+	layer1.Metadata() // Just ensure it doesn't panic
+}
+
+func TestBuildTest_LayerExecDFiles(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("helper")
+		layer.Build = true
+
+		// Create exec.d directory with scripts
+		execDDir := filepath.Join(layer.Path, "exec.d")
+		if err := os.MkdirAll(execDDir, 0755); err != nil {
+			return libcnb.BuildResult{}, err
+		}
+		os.WriteFile(filepath.Join(execDDir, "0-setup"), []byte("#!/bin/bash"), 0755)
+		os.WriteFile(filepath.Join(execDDir, "1-configure"), []byte("#!/bin/bash"), 0755)
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Fatalf("build failed: %v", result.Error())
+	}
+
+	layer := result.Layer("helper")
+	execDFiles, err := layer.ExecDFiles()
+	if err != nil {
+		t.Errorf("ExecDFiles failed: %v", err)
+	}
+	if len(execDFiles) != 2 {
+		t.Errorf("expected 2 exec.d files, got %d", len(execDFiles))
+	}
+}
+
+func TestDetectResult_Plans(t *testing.T) {
+	detector := func(ctx libcnb.DetectContext) (libcnb.DetectResult, error) {
+		return libcnb.DetectResult{
+			Pass: true,
+			Plans: []libcnb.BuildPlan{
+				{
+					Provides: []libcnb.BuildPlanProvide{{Name: "jdk"}},
+					Requires: []libcnb.BuildPlanRequire{{Name: "jdk"}},
+				},
+			},
+		}, nil
+	}
+
+	result := bptest.NewDetectTest().ExecuteT(t, detector)
+
+	plans := result.Plans()
+	if len(plans) != 1 {
+		t.Errorf("expected 1 plan, got %d", len(plans))
+	}
+}

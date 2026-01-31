@@ -225,3 +225,41 @@ func TestDetectTest_Cleanup(t *testing.T) {
 		t.Error("app dir should not exist after cleanup")
 	}
 }
+
+func TestDetectTest_WithTarget(t *testing.T) {
+	// Note: DetectContext doesn't have TargetInfo in the same way BuildContext does
+	// but we test that WithTarget doesn't break anything and the test completes
+	detector := func(ctx libcnb.DetectContext) (libcnb.DetectResult, error) {
+		return libcnb.DetectResult{Pass: true}, nil
+	}
+
+	result := bptest.NewDetectTest().
+		WithTarget(bptest.TargetInfo{
+			OS:            "linux",
+			Arch:          "amd64",
+			DistroName:    "ubuntu",
+			DistroVersion: "22.04",
+		}).
+		ExecuteT(t, detector)
+
+	if !result.Passed() {
+		t.Error("expected detect to pass with target info")
+	}
+}
+
+func TestDetectTest_WithStackID(t *testing.T) {
+	detector := func(ctx libcnb.DetectContext) (libcnb.DetectResult, error) {
+		if ctx.StackID != "io.buildpacks.stacks.jammy" {
+			t.Errorf("expected stack ID io.buildpacks.stacks.jammy, got %s", ctx.StackID)
+		}
+		return libcnb.DetectResult{Pass: true}, nil
+	}
+
+	result := bptest.NewDetectTest().
+		WithStackID("io.buildpacks.stacks.jammy").
+		ExecuteT(t, detector)
+
+	if !result.Passed() {
+		t.Error("expected detect to pass with stack ID")
+	}
+}
