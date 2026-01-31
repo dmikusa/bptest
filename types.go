@@ -1,9 +1,7 @@
 package bptest
 
 import (
-	"bytes"
-
-	"github.com/BurntSushi/toml"
+	internaltoml "github.com/dmikusa/bptest/internal/toml"
 )
 
 // Binding represents a service binding for testing.
@@ -43,11 +41,7 @@ func (c BuildpackConfig) ToTOML() ([]byte, error) {
 		data["buildpack"].(map[string]any)["name"] = c.Name
 	}
 
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(data); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return internaltoml.Encode(data)
 }
 
 // LayerConfig configures an existing layer for rebuild scenarios.

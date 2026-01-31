@@ -2,10 +2,20 @@
 package toml
 
 import (
+	"bytes"
 	"os"
 
 	"github.com/BurntSushi/toml"
 )
+
+// Encode encodes a value to TOML format and returns the bytes.
+func Encode(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
 
 // Read reads and decodes a TOML file into the given type.
 func Read[T any](path string) (T, error) {

@@ -106,6 +106,42 @@ func TestWrite_InvalidPath(t *testing.T) {
 	}
 }
 
+func TestEncode(t *testing.T) {
+	type Config struct {
+		Name    string `toml:"name"`
+		Version string `toml:"version"`
+	}
+
+	config := Config{
+		Name:    "myapp",
+		Version: "1.0.0",
+	}
+
+	data, err := toml.Encode(config)
+	if err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+
+	// Verify it's valid TOML by reading it back
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.toml")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	result, err := toml.Read[Config](path)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	if result.Name != "myapp" {
+		t.Errorf("expected name 'myapp', got '%s'", result.Name)
+	}
+	if result.Version != "1.0.0" {
+		t.Errorf("expected version '1.0.0', got '%s'", result.Version)
+	}
+}
+
 func TestLayerContent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "layer.toml")
