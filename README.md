@@ -344,4 +344,6 @@ See the full API documentation on [pkg.go.dev](https://pkg.go.dev/github.com/dmi
 
 ## License
 
-Apache 2.0
+This project is released under version 2.0 of the [Apache License][a].
+
+[a]: http://www.apache.org/licenses/LICENSE-2.0
