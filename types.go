@@ -38,10 +38,11 @@ type TargetInfo struct {
 
 // BuildpackConfig holds buildpack metadata for generating buildpack.toml.
 type BuildpackConfig struct {
-	API     string
-	ID      string
-	Version string
-	Name    string
+	API      string
+	ID       string
+	Version  string
+	Name     string
+	Metadata map[string]any
 }
 
 // ToTOML serializes the BuildpackConfig to TOML format.
@@ -56,8 +57,92 @@ func (c BuildpackConfig) ToTOML() ([]byte, error) {
 	if c.Name != "" {
 		data["buildpack"].(map[string]any)["name"] = c.Name
 	}
+	if len(c.Metadata) > 0 {
+		data["metadata"] = c.Metadata
+	}
 
 	return internaltoml.Encode(data)
+}
+
+// ConfigurationMetadata represents a buildpack configuration entry.
+type ConfigurationMetadata struct {
+	Name        string
+	Description string
+	Default     string
+	Launch      bool
+	Build       bool
+}
+
+// toMap converts ConfigurationMetadata to a map for TOML encoding.
+func (c ConfigurationMetadata) toMap() map[string]any {
+	m := map[string]any{
+		"name":        c.Name,
+		"description": c.Description,
+		"default":     c.Default,
+	}
+	if c.Launch {
+		m["launch"] = true
+	}
+	if c.Build {
+		m["build"] = true
+	}
+	return m
+}
+
+// DependencyMetadata represents a buildpack dependency entry.
+type DependencyMetadata struct {
+	ID           string
+	Name         string
+	Version      string
+	URI          string
+	SHA256       string
+	Stacks       []string
+	CPEs         []string
+	PURL         string
+	Source       string
+	SourceSHA256 string
+	Licenses     []LicenseMetadata
+}
+
+// LicenseMetadata represents a license entry for a dependency.
+type LicenseMetadata struct {
+	Type string
+	URI  string
+}
+
+// toMap converts DependencyMetadata to a map for TOML encoding.
+func (d DependencyMetadata) toMap() map[string]any {
+	m := map[string]any{
+		"id":      d.ID,
+		"name":    d.Name,
+		"version": d.Version,
+		"uri":     d.URI,
+		"sha256":  d.SHA256,
+		"stacks":  d.Stacks,
+	}
+	if len(d.CPEs) > 0 {
+		m["cpes"] = d.CPEs
+	}
+	if d.PURL != "" {
+		m["purl"] = d.PURL
+	}
+	if d.Source != "" {
+		m["source"] = d.Source
+	}
+	if d.SourceSHA256 != "" {
+		m["source-sha256"] = d.SourceSHA256
+	}
+	if len(d.Licenses) > 0 {
+		var licenses []map[string]any
+		for _, lic := range d.Licenses {
+			licenses = append(licenses, map[string]any{
+				"type": lic.Type,
+				"uri":  lic.URI,
+			})
+		}
+		m["licenses"] = licenses
+	}
+	return m
 }
 
 // LayerConfig configures an existing layer for rebuild scenarios.

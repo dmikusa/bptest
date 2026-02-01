@@ -782,3 +782,212 @@ func TestDetectResult_Plans(t *testing.T) {
 		t.Errorf("expected 1 plan, got %d", len(plans))
 	}
 }
+
+func TestBuildTest_WithPlan(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		if len(ctx.Plan.Entries) != 2 {
+			t.Errorf("expected 2 plan entries, got %d", len(ctx.Plan.Entries))
+		}
+		if ctx.Plan.Entries[0].Name != "jdk" {
+			t.Errorf("expected first entry to be jdk, got %s", ctx.Plan.Entries[0].Name)
+		}
+		if ctx.Plan.Entries[1].Name != "jre" {
+			t.Errorf("expected second entry to be jre, got %s", ctx.Plan.Entries[1].Name)
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	plan := libcnb.BuildpackPlan{
+		Entries: []libcnb.BuildpackPlanEntry{
+			{Name: "jdk", Metadata: map[string]any{"version": "17"}},
+			{Name: "jre", Metadata: map[string]any{"version": "17"}},
+		},
+	}
+
+	result := bptest.NewBuildTest().
+		WithPlan(plan).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+}
+
+func TestBuildTest_WithStackID(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		if ctx.StackID != "io.buildpacks.stacks.jammy" {
+			t.Errorf("expected stack ID io.buildpacks.stacks.jammy, got %s", ctx.StackID)
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithStackID("io.buildpacks.stacks.jammy").
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+}
+
+func TestBuildTest_WithConfigurationMetadata(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		configs, ok := ctx.Buildpack.Metadata["configurations"].([]map[string]any)
+		if !ok {
+			t.Error("expected configurations in metadata")
+			return libcnb.NewBuildResult(), nil
+		}
+		if len(configs) != 2 {
+			t.Errorf("expected 2 configurations, got %d", len(configs))
+		}
+		// Check first config
+		if configs[0]["name"] != "BPL_JVM_HEAD_ROOM" {
+			t.Errorf("expected BPL_JVM_HEAD_ROOM, got %v", configs[0]["name"])
+		}
+		if configs[0]["launch"] != true {
+			t.Error("expected launch to be true")
+		}
+		// Check second config
+		if configs[1]["name"] != "BP_JVM_VERSION" {
+			t.Errorf("expected BP_JVM_VERSION, got %v", configs[1]["name"])
+		}
+		if configs[1]["build"] != true {
+			t.Error("expected build to be true")
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithConfigurationMetadata(bptest.ConfigurationMetadata{
+			Name:        "BPL_JVM_HEAD_ROOM",
+			Description: "the headroom in memory calculation",
+			Default:     "0",
+			Launch:      true,
+		}).
+		WithConfigurationMetadata(bptest.ConfigurationMetadata{
+			Name:        "BP_JVM_VERSION",
+			Description: "the Java version",
+			Default:     "17",
+			Build:       true,
+		}).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+}
+
+func TestBuildTest_WithDependencyMetadata(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		deps, ok := ctx.Buildpack.Metadata["dependencies"].([]map[string]any)
+		if !ok {
+			t.Error("expected dependencies in metadata")
+			return libcnb.NewBuildResult(), nil
+		}
+		if len(deps) != 1 {
+			t.Errorf("expected 1 dependency, got %d", len(deps))
+		}
+		if deps[0]["id"] != "jdk" {
+			t.Errorf("expected jdk, got %v", deps[0]["id"])
+		}
+		if deps[0]["version"] != "8.0.482" {
+			t.Errorf("expected 8.0.482, got %v", deps[0]["version"])
+		}
+		// Check licenses
+		licenses, ok := deps[0]["licenses"].([]map[string]any)
+		if !ok {
+			t.Error("expected licenses in dependency")
+			return libcnb.NewBuildResult(), nil
+		}
+		if len(licenses) != 1 {
+			t.Errorf("expected 1 license, got %d", len(licenses))
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithDependencyMetadata(bptest.DependencyMetadata{
+			ID:           "jdk",
+			Name:         "BellSoft Liberica JDK",
+			Version:      "8.0.482",
+			URI:          "https://example.com/jdk.tar.gz",
+			SHA256:       "abc123",
+			Stacks:       []string{"*"},
+			CPEs:         []string{"cpe:2.3:a:oracle:jdk:1.8.0:*"},
+			PURL:         "pkg:generic/bellsoft-jdk@8.0.482",
+			Source:       "https://example.com/jdk-src.tar.gz",
+			SourceSHA256: "def456",
+			Licenses: []bptest.LicenseMetadata{
+				{
+					Type: "GPL-2.0",
+					URI:  "https://example.com/license",
+				},
+			},
+		}).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+}
+
+func TestDetectTest_WithConfigurationMetadata(t *testing.T) {
+	detector := func(ctx libcnb.DetectContext) (libcnb.DetectResult, error) {
+		configs, ok := ctx.Buildpack.Metadata["configurations"].([]map[string]any)
+		if !ok {
+			t.Error("expected configurations in metadata")
+			return libcnb.DetectResult{Pass: false}, nil
+		}
+		if len(configs) != 1 {
+			t.Errorf("expected 1 configuration, got %d", len(configs))
+		}
+		if configs[0]["name"] != "BP_JAVA_VERSION" {
+			t.Errorf("expected BP_JAVA_VERSION, got %v", configs[0]["name"])
+		}
+		return libcnb.DetectResult{Pass: true}, nil
+	}
+
+	result := bptest.NewDetectTest().
+		WithConfigurationMetadata(bptest.ConfigurationMetadata{
+			Name:        "BP_JAVA_VERSION",
+			Description: "the Java version",
+			Default:     "17",
+		}).
+		ExecuteT(t, detector)
+
+	if !result.Passed() {
+		t.Error("expected detect to pass")
+	}
+}
+
+func TestDetectTest_WithDependencyMetadata(t *testing.T) {
+	detector := func(ctx libcnb.DetectContext) (libcnb.DetectResult, error) {
+		deps, ok := ctx.Buildpack.Metadata["dependencies"].([]map[string]any)
+		if !ok {
+			t.Error("expected dependencies in metadata")
+			return libcnb.DetectResult{Pass: false}, nil
+		}
+		if len(deps) != 1 {
+			t.Errorf("expected 1 dependency, got %d", len(deps))
+		}
+		if deps[0]["id"] != "jdk" {
+			t.Errorf("expected jdk, got %v", deps[0]["id"])
+		}
+		return libcnb.DetectResult{Pass: true}, nil
+	}
+
+	result := bptest.NewDetectTest().
+		WithDependencyMetadata(bptest.DependencyMetadata{
+			ID:      "jdk",
+			Name:    "OpenJDK",
+			Version: "17.0.1",
+			URI:     "https://example.com/jdk.tar.gz",
+			SHA256:  "abc123",
+			Stacks:  []string{"*"},
+		}).
+		ExecuteT(t, detector)
+
+	if !result.Passed() {
+		t.Error("expected detect to pass")
+	}
+}

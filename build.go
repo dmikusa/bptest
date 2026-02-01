@@ -33,6 +33,8 @@ import (
 type BuildTest struct {
 	appFiles           map[string][]byte
 	buildpack          BuildpackConfig
+	configurations     []ConfigurationMetadata
+	dependencies       []DependencyMetadata
 	platformEnv        map[string]string
 	bindings           []Binding
 	planEntries        []libcnb.BuildpackPlanEntry
@@ -127,6 +129,18 @@ func (b *BuildTest) WithTarget(target TargetInfo) *BuildTest {
 	return b
 }
 
+// WithConfigurationMetadata adds a configuration entry to the buildpack metadata.
+func (b *BuildTest) WithConfigurationMetadata(config ConfigurationMetadata) *BuildTest {
+	b.configurations = append(b.configurations, config)
+	return b
+}
+
+// WithDependencyMetadata adds a dependency entry to the buildpack metadata.
+func (b *BuildTest) WithDependencyMetadata(dep DependencyMetadata) *BuildTest {
+	b.dependencies = append(b.dependencies, dep)
+	return b
+}
+
 // Paths returns the test directory paths after Execute has been called.
 func (b *BuildTest) Paths() TestPaths {
 	return b.paths
@@ -186,6 +200,27 @@ func (b *BuildTest) setup() error {
 		return err
 	}
 	b.paths.BuildpackDir = bpDir
+
+	// Merge configurations and dependencies into buildpack metadata
+	if len(b.configurations) > 0 || len(b.dependencies) > 0 {
+		if b.buildpack.Metadata == nil {
+			b.buildpack.Metadata = make(map[string]any)
+		}
+		if len(b.configurations) > 0 {
+			var configs []map[string]any
+			for _, c := range b.configurations {
+				configs = append(configs, c.toMap())
+			}
+			b.buildpack.Metadata["configurations"] = configs
+		}
+		if len(b.dependencies) > 0 {
+			var deps []map[string]any
+			for _, d := range b.dependencies {
+				deps = append(deps, d.toMap())
+			}
+			b.buildpack.Metadata["dependencies"] = deps
+		}
+	}
 
 	// Write buildpack.toml
 	bpTOML, err := b.buildpack.ToTOML()

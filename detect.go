@@ -30,14 +30,16 @@ import (
 
 // DetectTest configures and executes buildpack detect tests.
 type DetectTest struct {
-	appFiles    map[string][]byte
-	buildpack   BuildpackConfig
-	platformEnv map[string]string
-	bindings    []Binding
-	stackID     string
-	target      *TargetInfo
-	dirManager  *testdir.Manager
-	paths       TestPaths
+	appFiles       map[string][]byte
+	buildpack      BuildpackConfig
+	configurations []ConfigurationMetadata
+	dependencies   []DependencyMetadata
+	platformEnv    map[string]string
+	bindings       []Binding
+	stackID        string
+	target         *TargetInfo
+	dirManager     *testdir.Manager
+	paths          TestPaths
 }
 
 // NewDetectTest creates a new DetectTest with default values.
@@ -92,6 +94,18 @@ func (d *DetectTest) WithStackID(stackID string) *DetectTest {
 // WithTarget sets the target platform information.
 func (d *DetectTest) WithTarget(target TargetInfo) *DetectTest {
 	d.target = &target
+	return d
+}
+
+// WithConfigurationMetadata adds a configuration entry to the buildpack metadata.
+func (d *DetectTest) WithConfigurationMetadata(config ConfigurationMetadata) *DetectTest {
+	d.configurations = append(d.configurations, config)
+	return d
+}
+
+// WithDependencyMetadata adds a dependency entry to the buildpack metadata.
+func (d *DetectTest) WithDependencyMetadata(dep DependencyMetadata) *DetectTest {
+	d.dependencies = append(d.dependencies, dep)
 	return d
 }
 
@@ -153,6 +167,27 @@ func (d *DetectTest) setup() error {
 		return err
 	}
 	d.paths.BuildpackDir = bpDir
+
+	// Merge configurations and dependencies into buildpack metadata
+	if len(d.configurations) > 0 || len(d.dependencies) > 0 {
+		if d.buildpack.Metadata == nil {
+			d.buildpack.Metadata = make(map[string]any)
+		}
+		if len(d.configurations) > 0 {
+			var configs []map[string]any
+			for _, c := range d.configurations {
+				configs = append(configs, c.toMap())
+			}
+			d.buildpack.Metadata["configurations"] = configs
+		}
+		if len(d.dependencies) > 0 {
+			var deps []map[string]any
+			for _, dep := range d.dependencies {
+				deps = append(deps, dep.toMap())
+			}
+			d.buildpack.Metadata["dependencies"] = deps
+		}
+	}
 
 	// Write buildpack.toml
 	bpTOML, err := d.buildpack.ToTOML()

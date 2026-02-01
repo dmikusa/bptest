@@ -237,6 +237,44 @@
 // Available matchers for BuildResult:
 //   - HaveSucceeded() - check if build succeeded
 //   - HaveLayer(name) - check if layer exists
+//   - HaveLayerCount(n) - check exact number of layers
+//   - HaveLayers(names...) - check that specified layers exist (others may exist)
+//   - HaveExactlyLayers(names...) - check that only specified layers exist
 //   - HaveProcess(type) - check if process type exists
 //   - HaveLabel(key) or HaveLabel(key, value) - check label exists/matches value
+//
+// Available matchers for LayerResult:
+//   - HaveFile(path) - check if file exists in layer
+//   - HaveFileWithContents(path, contents) - check file exists with exact contents
+//   - BeBuildLayer() - check if layer is marked for build
+//   - BeLaunchLayer() - check if layer is marked for launch
+//   - BeCacheLayer() - check if layer is marked for caching
+//   - HaveMetadata(key) or HaveMetadata(key, value) - check layer metadata
+//
+// # Buildpack Metadata
+//
+// Configure buildpack metadata including configurations and dependencies:
+//
+//	func TestBuild_WithMetadata(t *testing.T) {
+//		result := bptest.NewBuildTest().
+//			WithConfigurationMetadata(bptest.ConfigurationMetadata{
+//				Name:        "BP_JVM_VERSION",
+//				Description: "the Java version",
+//				Default:     "17",
+//				Build:       true,
+//			}).
+//			WithDependencyMetadata(bptest.DependencyMetadata{
+//				ID:      "jdk",
+//				Name:    "BellSoft Liberica JDK",
+//				Version: "17.0.1",
+//				URI:     "https://example.com/jdk.tar.gz",
+//				SHA256:  "abc123...",
+//				Stacks:  []string{"*"},
+//			}).
+//			ExecuteT(t, myBuilder.Build)
+//
+//		if !result.Succeeded() {
+//			t.Fatalf("build failed: %v", result.Error())
+//		}
+//	}
 package bptest

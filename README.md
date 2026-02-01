@@ -395,9 +395,98 @@ func TestBuild_WithGomega(t *testing.T) {
 |---------|-------------|
 | `HaveSucceeded()` | Check if build succeeded |
 | `HaveLayer(name)` | Check if layer exists |
+| `HaveLayerCount(n)` | Check exact number of layers |
+| `HaveLayers(names...)` | Check that specified layers exist (others may exist) |
+| `HaveExactlyLayers(names...)` | Check that only specified layers exist |
 | `HaveProcess(type)` | Check if process type exists |
 | `HaveLabel(key)` | Check if label key exists |
 | `HaveLabel(key, value)` | Check if label has specific value |
+
+**LayerResult matchers:**
+
+| Matcher | Description |
+|---------|-------------|
+| `HaveFile(path)` | Check if file exists in layer |
+| `HaveFileWithContents(path, contents)` | Check file exists with exact contents |
+| `BeBuildLayer()` | Check if layer is marked for build |
+| `BeLaunchLayer()` | Check if layer is marked for launch |
+| `BeCacheLayer()` | Check if layer is marked for caching |
+| `HaveMetadata(key)` | Check if layer has metadata key |
+| `HaveMetadata(key, value)` | Check if layer metadata has specific value |
+
+#### Layer Matchers Example
+
+```go
+func TestBuild_LayerMatchers(t *testing.T) {
+    g := NewWithT(t)
+
+    result := bptest.NewBuildTest().
+        WithPlanEntry("jdk", nil).
+        ExecuteT(t, myBuilder.Build)
+
+    // Check layer counts
+    g.Expect(result).To(HaveLayerCount(2))
+    g.Expect(result).To(HaveLayers("jdk", "helper"))
+    g.Expect(result).To(HaveExactlyLayers("jdk", "helper"))
+
+    // Check layer properties
+    layer := result.Layer("jdk")
+    g.Expect(layer).To(BeBuildLayer())
+    g.Expect(layer).To(BeCacheLayer())
+    g.Expect(layer).NotTo(BeLaunchLayer())
+
+    // Check layer files
+    g.Expect(layer).To(HaveFile("bin/java"))
+    g.Expect(layer).To(HaveFileWithContents("version", "17.0.1"))
+
+    // Check layer metadata
+    g.Expect(layer).To(HaveMetadata("version"))
+    g.Expect(layer).To(HaveMetadata("version", "17"))
+}
+```
+
+### Buildpack Metadata
+
+Configure buildpack metadata including configurations and dependencies:
+
+```go
+func TestBuild_WithBuildpackMetadata(t *testing.T) {
+    result := bptest.NewBuildTest().
+        WithConfigurationMetadata(bptest.ConfigurationMetadata{
+            Name:        "BP_JVM_VERSION",
+            Description: "the Java version to install",
+            Default:     "17",
+            Build:       true,
+        }).
+        WithConfigurationMetadata(bptest.ConfigurationMetadata{
+            Name:        "BPL_JVM_HEAD_ROOM",
+            Description: "the headroom in memory calculation",
+            Default:     "0",
+            Launch:      true,
+        }).
+        WithDependencyMetadata(bptest.DependencyMetadata{
+            ID:           "jdk",
+            Name:         "BellSoft Liberica JDK",
+            Version:      "17.0.1",
+            URI:          "https://example.com/jdk.tar.gz",
+            SHA256:       "abc123...",
+            Stacks:       []string{"*"},
+            CPEs:         []string{"cpe:2.3:a:oracle:jdk:17.0.1:*:*:*:*:*:*:*"},
+            PURL:         "pkg:generic/bellsoft-jdk@17.0.1",
+            Source:       "https://example.com/jdk-src.tar.gz",
+            SourceSHA256: "def456...",
+            Licenses: []bptest.LicenseMetadata{
+                {Type: "GPL-2.0 WITH Classpath-exception-2.0", URI: "https://openjdk.java.net/legal/gplv2+ce.html"},
+            },
+        }).
+        WithPlanEntry("jdk", nil).
+        ExecuteT(t, myBuilder.Build)
+
+    if !result.Succeeded() {
+        t.Fatalf("build failed: %v", result.Error())
+    }
+}
+```
 
 ## API Reference
 
