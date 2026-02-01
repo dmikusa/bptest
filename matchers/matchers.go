@@ -33,6 +33,7 @@ package matchers
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/onsi/gomega/types"
 
@@ -237,6 +238,142 @@ func (m *haveLayerMatcher) FailureMessage(actual any) string {
 
 func (m *haveLayerMatcher) NegatedFailureMessage(actual any) string {
 	return fmt.Sprintf("Expected build result not to have layer %q, but it did", m.name)
+}
+
+// HaveLayerCount returns a matcher that checks if the build result has exactly n layers.
+func HaveLayerCount(n int) types.GomegaMatcher {
+	return &haveLayerCountMatcher{count: n}
+}
+
+type haveLayerCountMatcher struct {
+	count int
+}
+
+func (m *haveLayerCountMatcher) Match(actual any) (bool, error) {
+	result, ok := actual.(*bptest.BuildResult)
+	if !ok {
+		return false, fmt.Errorf("HaveLayerCount expects a *bptest.BuildResult, got %T", actual)
+	}
+	return result.Layers().Count() == m.count, nil
+}
+
+func (m *haveLayerCountMatcher) FailureMessage(actual any) string {
+	result := actual.(*bptest.BuildResult)
+	return fmt.Sprintf("Expected build result to have %d layer(s), but has %d: %v",
+		m.count, result.Layers().Count(), result.Layers().Names())
+}
+
+func (m *haveLayerCountMatcher) NegatedFailureMessage(actual any) string {
+	result := actual.(*bptest.BuildResult)
+	return fmt.Sprintf("Expected build result not to have %d layer(s), but it does: %v",
+		m.count, result.Layers().Names())
+}
+
+// HaveLayers returns a matcher that checks if all specified layers are present.
+// Additional layers may also be present.
+func HaveLayers(names ...string) types.GomegaMatcher {
+	return &haveLayersMatcher{names: names}
+}
+
+type haveLayersMatcher struct {
+	names   []string
+	missing []string
+}
+
+func (m *haveLayersMatcher) Match(actual any) (bool, error) {
+	result, ok := actual.(*bptest.BuildResult)
+	if !ok {
+		return false, fmt.Errorf("HaveLayers expects a *bptest.BuildResult, got %T", actual)
+	}
+	m.missing = nil
+	for _, name := range m.names {
+		if result.Layer(name) == nil {
+			m.missing = append(m.missing, name)
+		}
+	}
+	return len(m.missing) == 0, nil
+}
+
+func (m *haveLayersMatcher) FailureMessage(actual any) string {
+	result := actual.(*bptest.BuildResult)
+	return fmt.Sprintf("Expected build result to have layers %v, but missing: %v (actual layers: %v)",
+		m.names, m.missing, result.Layers().Names())
+}
+
+func (m *haveLayersMatcher) NegatedFailureMessage(actual any) string {
+	return fmt.Sprintf("Expected build result not to have all layers %v, but it did", m.names)
+}
+
+// HaveExactlyLayers returns a matcher that checks if the build result has exactly
+// the specified layers and no others.
+func HaveExactlyLayers(names ...string) types.GomegaMatcher {
+	return &haveExactlyLayersMatcher{names: names}
+}
+
+type haveExactlyLayersMatcher struct {
+	names   []string
+	missing []string
+	extra   []string
+}
+
+func (m *haveExactlyLayersMatcher) Match(actual any) (bool, error) {
+	result, ok := actual.(*bptest.BuildResult)
+	if !ok {
+		return false, fmt.Errorf("HaveExactlyLayers expects a *bptest.BuildResult, got %T", actual)
+	}
+
+	m.missing = nil
+	m.extra = nil
+
+	// Check for missing layers
+	actualNames := result.Layers().Names()
+	actualSet := make(map[string]bool)
+	for _, name := range actualNames {
+		actualSet[name] = true
+	}
+	for _, name := range m.names {
+		if !actualSet[name] {
+			m.missing = append(m.missing, name)
+		}
+	}
+
+	// Check for extra layers
+	expectedSet := make(map[string]bool)
+	for _, name := range m.names {
+		expectedSet[name] = true
+	}
+	for _, name := range actualNames {
+		if !expectedSet[name] {
+			m.extra = append(m.extra, name)
+		}
+	}
+
+	return len(m.missing) == 0 && len(m.extra) == 0, nil
+}
+
+func (m *haveExactlyLayersMatcher) FailureMessage(actual any) string {
+	result := actual.(*bptest.BuildResult)
+	expected := make([]string, len(m.names))
+	copy(expected, m.names)
+	sort.Strings(expected)
+
+	if len(m.missing) > 0 && len(m.extra) > 0 {
+		return fmt.Sprintf("Expected build result to have exactly layers %v, but missing: %v, extra: %v",
+			expected, m.missing, m.extra)
+	}
+	if len(m.missing) > 0 {
+		return fmt.Sprintf("Expected build result to have exactly layers %v, but missing: %v (actual: %v)",
+			expected, m.missing, result.Layers().Names())
+	}
+	return fmt.Sprintf("Expected build result to have exactly layers %v, but has extra: %v",
+		expected, m.extra)
+}
+
+func (m *haveExactlyLayersMatcher) NegatedFailureMessage(actual any) string {
+	expected := make([]string, len(m.names))
+	copy(expected, m.names)
+	sort.Strings(expected)
+	return fmt.Sprintf("Expected build result not to have exactly layers %v, but it did", expected)
 }
 
 // HaveProcess returns a matcher that checks if a process with the given type exists.

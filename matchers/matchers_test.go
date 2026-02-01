@@ -513,3 +513,199 @@ func TestHaveLabel_FailureMessages(t *testing.T) {
 	g.Expect(msg).To(ContainSubstring("not to have label"))
 	g.Expect(msg).To(ContainSubstring("My App"))
 }
+
+func TestHaveLayerCount(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer1, _ := ctx.Layers.Layer("jdk")
+		layer1.Build = true
+		layer2, _ := ctx.Layers.Layer("jre")
+		layer2.Launch = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer1, layer2)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	g.Expect(result).To(HaveLayerCount(2))
+	g.Expect(result).NotTo(HaveLayerCount(1))
+	g.Expect(result).NotTo(HaveLayerCount(3))
+}
+
+func TestHaveLayerCount_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	// Test failure message
+	matcher := HaveLayerCount(3)
+	msg := matcher.FailureMessage(result)
+	g.Expect(msg).To(ContainSubstring("3"))
+	g.Expect(msg).To(ContainSubstring("1"))
+
+	// Test negated failure message
+	matcher = HaveLayerCount(1)
+	msg = matcher.NegatedFailureMessage(result)
+	g.Expect(msg).To(ContainSubstring("not to have 1"))
+}
+
+func TestHaveLayerCount_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := HaveLayerCount(1).Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+}
+
+func TestHaveLayers(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer1, _ := ctx.Layers.Layer("jdk")
+		layer1.Build = true
+		layer2, _ := ctx.Layers.Layer("jre")
+		layer2.Launch = true
+		layer3, _ := ctx.Layers.Layer("maven")
+		layer3.Cache = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer1, layer2, layer3)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	// All specified layers present
+	g.Expect(result).To(HaveLayers("jdk", "jre"))
+	g.Expect(result).To(HaveLayers("jdk"))
+	g.Expect(result).To(HaveLayers("jdk", "jre", "maven"))
+
+	// Missing layer
+	g.Expect(result).NotTo(HaveLayers("nodejs"))
+	g.Expect(result).NotTo(HaveLayers("jdk", "nodejs"))
+}
+
+func TestHaveLayers_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	// Test failure message shows missing layers
+	matcher := HaveLayers("jdk", "nodejs", "python")
+	matcher.Match(result) // Must call Match first to populate state
+	msg := matcher.FailureMessage(result)
+	g.Expect(msg).To(ContainSubstring("nodejs"))
+	g.Expect(msg).To(ContainSubstring("python"))
+	g.Expect(msg).To(ContainSubstring("missing"))
+
+	// Test negated failure message
+	matcher = HaveLayers("jdk")
+	matcher.Match(result)
+	msg = matcher.NegatedFailureMessage(result)
+	g.Expect(msg).To(ContainSubstring("not to have all layers"))
+}
+
+func TestHaveLayers_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := HaveLayers("jdk").Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+}
+
+func TestHaveExactlyLayers(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer1, _ := ctx.Layers.Layer("jdk")
+		layer1.Build = true
+		layer2, _ := ctx.Layers.Layer("jre")
+		layer2.Launch = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer1, layer2)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	// Exactly the right layers (order doesn't matter)
+	g.Expect(result).To(HaveExactlyLayers("jdk", "jre"))
+	g.Expect(result).To(HaveExactlyLayers("jre", "jdk"))
+
+	// Missing a layer
+	g.Expect(result).NotTo(HaveExactlyLayers("jdk"))
+
+	// Extra layer expected
+	g.Expect(result).NotTo(HaveExactlyLayers("jdk", "jre", "maven"))
+}
+
+func TestHaveExactlyLayers_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer1, _ := ctx.Layers.Layer("jdk")
+		layer1.Build = true
+		layer2, _ := ctx.Layers.Layer("jre")
+		layer2.Launch = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer1, layer2)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	// Test failure message for missing layers
+	matcher := HaveExactlyLayers("jdk", "jre", "maven")
+	matcher.Match(result) // Must call Match first to populate state
+	msg := matcher.FailureMessage(result)
+	g.Expect(msg).To(ContainSubstring("maven"))
+	g.Expect(msg).To(ContainSubstring("missing"))
+
+	// Test failure message for extra layers
+	matcher = HaveExactlyLayers("jdk")
+	matcher.Match(result)
+	msg = matcher.FailureMessage(result)
+	g.Expect(msg).To(ContainSubstring("jre"))
+	g.Expect(msg).To(ContainSubstring("extra"))
+
+	// Test failure message for both missing and extra
+	matcher = HaveExactlyLayers("jdk", "maven")
+	matcher.Match(result)
+	msg = matcher.FailureMessage(result)
+	g.Expect(msg).To(ContainSubstring("maven"))
+	g.Expect(msg).To(ContainSubstring("jre"))
+
+	// Test negated failure message
+	matcher = HaveExactlyLayers("jdk", "jre")
+	matcher.Match(result)
+	msg = matcher.NegatedFailureMessage(result)
+	g.Expect(msg).To(ContainSubstring("not to have exactly"))
+}
+
+func TestHaveExactlyLayers_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := HaveExactlyLayers("jdk").Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+}
