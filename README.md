@@ -338,6 +338,67 @@ func TestBuild_WithTarget(t *testing.T) {
 }
 ```
 
+### Gomega Matchers
+
+The `matchers` subpackage provides custom [Gomega](https://onsi.github.io/gomega/) matchers for more expressive assertions.
+Import with dot notation for cleaner test code:
+
+```go
+import (
+    . "github.com/onsi/gomega"
+    "github.com/dmikusa/bptest"
+    . "github.com/dmikusa/bptest/matchers"
+)
+
+func TestDetect_WithGomega(t *testing.T) {
+    g := NewWithT(t)
+
+    result := bptest.NewDetectTest().
+        WithAppFileString("pom.xml", "<project/>").
+        ExecuteT(t, myDetector.Detect)
+
+    g.Expect(result).To(HavePassed())
+    g.Expect(result).To(HavePlan("jdk"))
+    g.Expect(result).To(Provide("jdk"))
+    g.Expect(result).To(Require("jvm"))
+}
+
+func TestBuild_WithGomega(t *testing.T) {
+    g := NewWithT(t)
+
+    result := bptest.NewBuildTest().
+        WithPlanEntry("jdk", nil).
+        ExecuteT(t, myBuilder.Build)
+
+    g.Expect(result).To(HaveSucceeded())
+    g.Expect(result).To(HaveLayer("jdk"))
+    g.Expect(result).To(HaveProcess("web"))
+    g.Expect(result).To(HaveLabel("org.opencontainers.image.title", "My App"))
+}
+```
+
+#### Available Matchers
+
+**DetectResult matchers:**
+
+| Matcher | Description |
+|---------|-------------|
+| `HavePassed()` | Check if detection passed |
+| `HaveFailed()` | Check if detection failed |
+| `HavePlan(name)` | Check if plan provides or requires name |
+| `Provide(name)` | Check if provides includes name |
+| `Require(name)` | Check if requires includes name |
+
+**BuildResult matchers:**
+
+| Matcher | Description |
+|---------|-------------|
+| `HaveSucceeded()` | Check if build succeeded |
+| `HaveLayer(name)` | Check if layer exists |
+| `HaveProcess(type)` | Check if process type exists |
+| `HaveLabel(key)` | Check if label key exists |
+| `HaveLabel(key, value)` | Check if label has specific value |
+
 ## API Reference
 
 See the full API documentation on [pkg.go.dev](https://pkg.go.dev/github.com/dmikusa/bptest).
