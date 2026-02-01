@@ -456,3 +456,219 @@ func (m *haveLabelMatcher) NegatedFailureMessage(actual any) string {
 	}
 	return fmt.Sprintf("Expected build result not to have label %q, but it did", m.key)
 }
+
+// LayerResult matchers
+
+// HaveFile returns a matcher that checks if a file exists in the layer.
+func HaveFile(relativePath string) types.GomegaMatcher {
+	return &haveFileMatcher{path: relativePath}
+}
+
+type haveFileMatcher struct {
+	path string
+}
+
+func (m *haveFileMatcher) Match(actual any) (bool, error) {
+	layer, ok := actual.(*bptest.LayerResult)
+	if !ok {
+		return false, fmt.Errorf("HaveFile expects a *bptest.LayerResult, got %T", actual)
+	}
+	if layer == nil {
+		return false, fmt.Errorf("HaveFile received nil layer")
+	}
+	return layer.FileExists(m.path), nil
+}
+
+func (m *haveFileMatcher) FailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q to have file %q, but it does not exist", layer.Name(), m.path)
+}
+
+func (m *haveFileMatcher) NegatedFailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q not to have file %q, but it exists", layer.Name(), m.path)
+}
+
+// HaveFileWithContents returns a matcher that checks if a file exists with specific contents.
+func HaveFileWithContents(relativePath string, contents string) types.GomegaMatcher {
+	return &haveFileWithContentsMatcher{path: relativePath, contents: contents}
+}
+
+type haveFileWithContentsMatcher struct {
+	path        string
+	contents    string
+	actualValue string
+	fileExists  bool
+}
+
+func (m *haveFileWithContentsMatcher) Match(actual any) (bool, error) {
+	layer, ok := actual.(*bptest.LayerResult)
+	if !ok {
+		return false, fmt.Errorf("HaveFileWithContents expects a *bptest.LayerResult, got %T", actual)
+	}
+	if layer == nil {
+		return false, fmt.Errorf("HaveFileWithContents received nil layer")
+	}
+	m.fileExists = layer.FileExists(m.path)
+	if !m.fileExists {
+		return false, nil
+	}
+	content, err := layer.FileContentString(m.path)
+	if err != nil {
+		return false, err
+	}
+	m.actualValue = content
+	return content == m.contents, nil
+}
+
+func (m *haveFileWithContentsMatcher) FailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	if !m.fileExists {
+		return fmt.Sprintf("Expected layer %q to have file %q with contents %q, but file does not exist",
+			layer.Name(), m.path, m.contents)
+	}
+	return fmt.Sprintf("Expected layer %q file %q to have contents:\n\t%q\nbut was:\n\t%q",
+		layer.Name(), m.path, m.contents, m.actualValue)
+}
+
+func (m *haveFileWithContentsMatcher) NegatedFailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q file %q not to have contents %q, but it did",
+		layer.Name(), m.path, m.contents)
+}
+
+// BeBuildLayer returns a matcher that checks if a layer is marked for build.
+func BeBuildLayer() types.GomegaMatcher {
+	return &beBuildLayerMatcher{}
+}
+
+type beBuildLayerMatcher struct{}
+
+func (m *beBuildLayerMatcher) Match(actual any) (bool, error) {
+	layer, ok := actual.(*bptest.LayerResult)
+	if !ok {
+		return false, fmt.Errorf("BeBuildLayer expects a *bptest.LayerResult, got %T", actual)
+	}
+	if layer == nil {
+		return false, fmt.Errorf("BeBuildLayer received nil layer")
+	}
+	return layer.IsBuild(), nil
+}
+
+func (m *beBuildLayerMatcher) FailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q to be a build layer, but it is not", layer.Name())
+}
+
+func (m *beBuildLayerMatcher) NegatedFailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q not to be a build layer, but it is", layer.Name())
+}
+
+// BeLaunchLayer returns a matcher that checks if a layer is marked for launch.
+func BeLaunchLayer() types.GomegaMatcher {
+	return &beLaunchLayerMatcher{}
+}
+
+type beLaunchLayerMatcher struct{}
+
+func (m *beLaunchLayerMatcher) Match(actual any) (bool, error) {
+	layer, ok := actual.(*bptest.LayerResult)
+	if !ok {
+		return false, fmt.Errorf("BeLaunchLayer expects a *bptest.LayerResult, got %T", actual)
+	}
+	if layer == nil {
+		return false, fmt.Errorf("BeLaunchLayer received nil layer")
+	}
+	return layer.IsLaunch(), nil
+}
+
+func (m *beLaunchLayerMatcher) FailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q to be a launch layer, but it is not", layer.Name())
+}
+
+func (m *beLaunchLayerMatcher) NegatedFailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q not to be a launch layer, but it is", layer.Name())
+}
+
+// BeCacheLayer returns a matcher that checks if a layer is marked for caching.
+func BeCacheLayer() types.GomegaMatcher {
+	return &beCacheLayerMatcher{}
+}
+
+type beCacheLayerMatcher struct{}
+
+func (m *beCacheLayerMatcher) Match(actual any) (bool, error) {
+	layer, ok := actual.(*bptest.LayerResult)
+	if !ok {
+		return false, fmt.Errorf("BeCacheLayer expects a *bptest.LayerResult, got %T", actual)
+	}
+	if layer == nil {
+		return false, fmt.Errorf("BeCacheLayer received nil layer")
+	}
+	return layer.IsCache(), nil
+}
+
+func (m *beCacheLayerMatcher) FailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q to be a cache layer, but it is not", layer.Name())
+}
+
+func (m *beCacheLayerMatcher) NegatedFailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q not to be a cache layer, but it is", layer.Name())
+}
+
+// HaveMetadata returns a matcher that checks if a layer has metadata with the given key.
+// Optionally checks the value if provided.
+func HaveMetadata(key string, value ...any) types.GomegaMatcher {
+	m := &haveMetadataMatcher{key: key}
+	if len(value) > 0 {
+		m.value = &value[0]
+	}
+	return m
+}
+
+type haveMetadataMatcher struct {
+	key         string
+	value       *any
+	actualValue any
+}
+
+func (m *haveMetadataMatcher) Match(actual any) (bool, error) {
+	layer, ok := actual.(*bptest.LayerResult)
+	if !ok {
+		return false, fmt.Errorf("HaveMetadata expects a *bptest.LayerResult, got %T", actual)
+	}
+	if layer == nil {
+		return false, fmt.Errorf("HaveMetadata received nil layer")
+	}
+	m.actualValue = layer.MetadataValue(m.key)
+	if m.actualValue == nil {
+		return false, nil
+	}
+	if m.value != nil {
+		return fmt.Sprintf("%v", m.actualValue) == fmt.Sprintf("%v", *m.value), nil
+	}
+	return true, nil
+}
+
+func (m *haveMetadataMatcher) FailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	if m.actualValue == nil {
+		return fmt.Sprintf("Expected layer %q to have metadata key %q, but it does not", layer.Name(), m.key)
+	}
+	return fmt.Sprintf("Expected layer %q metadata %q to be %v, but was %v",
+		layer.Name(), m.key, *m.value, m.actualValue)
+}
+
+func (m *haveMetadataMatcher) NegatedFailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	if m.value != nil {
+		return fmt.Sprintf("Expected layer %q not to have metadata %q with value %v, but it did",
+			layer.Name(), m.key, *m.value)
+	}
+	return fmt.Sprintf("Expected layer %q not to have metadata %q, but it did", layer.Name(), m.key)
+}

@@ -18,6 +18,8 @@ package matchers_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/buildpacks/libcnb/v2"
@@ -707,5 +709,456 @@ func TestHaveExactlyLayers_TypeErrors(t *testing.T) {
 	g := NewWithT(t)
 
 	_, err := HaveExactlyLayers("jdk").Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+}
+
+// LayerResult matcher tests
+
+func TestHaveFile(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		// Write a file to the layer
+		if err := os.MkdirAll(filepath.Join(layer.Path, "bin"), 0755); err != nil {
+			return libcnb.BuildResult{}, err
+		}
+		if err := os.WriteFile(filepath.Join(layer.Path, "bin/java"), []byte("java binary"), 0755); err != nil {
+			return libcnb.BuildResult{}, err
+		}
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	g.Expect(layer).To(HaveFile("bin/java"))
+	g.Expect(layer).NotTo(HaveFile("bin/python"))
+}
+
+func TestHaveFile_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	// Test failure message
+	matcher := HaveFile("bin/java")
+	matcher.Match(layer)
+	msg := matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("jdk"))
+	g.Expect(msg).To(ContainSubstring("bin/java"))
+	g.Expect(msg).To(ContainSubstring("does not exist"))
+
+	// Create file for negated test
+	os.MkdirAll(filepath.Join(layer.Path(), "bin"), 0755)
+	os.WriteFile(filepath.Join(layer.Path(), "bin/java"), []byte(""), 0755)
+
+	// Test negated failure message
+	matcher.Match(layer)
+	msg = matcher.NegatedFailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("not to have file"))
+}
+
+func TestHaveFile_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := HaveFile("test").Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+
+	// Test nil layer
+	var nilLayer *bptest.LayerResult
+	_, err = HaveFile("test").Match(nilLayer)
+	g.Expect(err).To(HaveOccurred())
+}
+
+func TestHaveFileWithContents(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		// Create the layer directory and write a file with specific contents
+		if err := os.MkdirAll(layer.Path, 0755); err != nil {
+			return libcnb.BuildResult{}, err
+		}
+		if err := os.WriteFile(filepath.Join(layer.Path, "version"), []byte("17.0.1"), 0644); err != nil {
+			return libcnb.BuildResult{}, err
+		}
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	g.Expect(layer).To(HaveFileWithContents("version", "17.0.1"))
+	g.Expect(layer).NotTo(HaveFileWithContents("version", "11.0.0"))
+	g.Expect(layer).NotTo(HaveFileWithContents("nonexistent", "anything"))
+}
+
+func TestHaveFileWithContents_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		// Create the layer directory and write file
+		os.MkdirAll(layer.Path, 0755)
+		os.WriteFile(filepath.Join(layer.Path, "version"), []byte("17.0.1"), 0644)
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	// Test failure message for file not found
+	matcher := HaveFileWithContents("nonexistent", "content")
+	matcher.Match(layer)
+	msg := matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("does not exist"))
+
+	// Test failure message for wrong contents
+	matcher = HaveFileWithContents("version", "11.0.0")
+	matcher.Match(layer)
+	msg = matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("11.0.0"))
+	g.Expect(msg).To(ContainSubstring("17.0.1"))
+
+	// Test negated failure message
+	matcher = HaveFileWithContents("version", "17.0.1")
+	matcher.Match(layer)
+	msg = matcher.NegatedFailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("not to have contents"))
+}
+
+func TestHaveFileWithContents_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := HaveFileWithContents("test", "content").Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+
+	// Test nil layer
+	var nilLayer *bptest.LayerResult
+	_, err = HaveFileWithContents("test", "content").Match(nilLayer)
+	g.Expect(err).To(HaveOccurred())
+}
+
+func TestBeBuildLayer(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		buildLayer, _ := ctx.Layers.Layer("build-layer")
+		buildLayer.Build = true
+
+		launchLayer, _ := ctx.Layers.Layer("launch-layer")
+		launchLayer.Launch = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, buildLayer, launchLayer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	g.Expect(result.Layer("build-layer")).To(BeBuildLayer())
+	g.Expect(result.Layer("launch-layer")).NotTo(BeBuildLayer())
+}
+
+func TestBeBuildLayer_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Launch = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	matcher := BeBuildLayer()
+	matcher.Match(layer)
+	msg := matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("jdk"))
+	g.Expect(msg).To(ContainSubstring("build layer"))
+
+	// For negated, we need a build layer
+	builder = func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+	result = bptest.NewBuildTest().ExecuteT(t, builder)
+	layer = result.Layer("jdk")
+
+	matcher.Match(layer)
+	msg = matcher.NegatedFailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("not to be a build layer"))
+}
+
+func TestBeBuildLayer_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := BeBuildLayer().Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+
+	// Test nil layer
+	var nilLayer *bptest.LayerResult
+	_, err = BeBuildLayer().Match(nilLayer)
+	g.Expect(err).To(HaveOccurred())
+}
+
+func TestBeLaunchLayer(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		launchLayer, _ := ctx.Layers.Layer("launch-layer")
+		launchLayer.Launch = true
+
+		buildLayer, _ := ctx.Layers.Layer("build-layer")
+		buildLayer.Build = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, launchLayer, buildLayer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	g.Expect(result.Layer("launch-layer")).To(BeLaunchLayer())
+	g.Expect(result.Layer("build-layer")).NotTo(BeLaunchLayer())
+}
+
+func TestBeLaunchLayer_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	matcher := BeLaunchLayer()
+	matcher.Match(layer)
+	msg := matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("launch layer"))
+
+	// For negated, we need a launch layer
+	builder = func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Launch = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+	result = bptest.NewBuildTest().ExecuteT(t, builder)
+	layer = result.Layer("jdk")
+
+	matcher.Match(layer)
+	msg = matcher.NegatedFailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("not to be a launch layer"))
+}
+
+func TestBeLaunchLayer_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := BeLaunchLayer().Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+
+	// Test nil layer
+	var nilLayer *bptest.LayerResult
+	_, err = BeLaunchLayer().Match(nilLayer)
+	g.Expect(err).To(HaveOccurred())
+}
+
+func TestBeCacheLayer(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		cacheLayer, _ := ctx.Layers.Layer("cache-layer")
+		cacheLayer.Cache = true
+
+		buildLayer, _ := ctx.Layers.Layer("build-layer")
+		buildLayer.Build = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, cacheLayer, buildLayer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+
+	g.Expect(result.Layer("cache-layer")).To(BeCacheLayer())
+	g.Expect(result.Layer("build-layer")).NotTo(BeCacheLayer())
+}
+
+func TestBeCacheLayer_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	matcher := BeCacheLayer()
+	matcher.Match(layer)
+	msg := matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("cache layer"))
+
+	// For negated, we need a cache layer
+	builder = func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Cache = true
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+	result = bptest.NewBuildTest().ExecuteT(t, builder)
+	layer = result.Layer("jdk")
+
+	matcher.Match(layer)
+	msg = matcher.NegatedFailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("not to be a cache layer"))
+}
+
+func TestBeCacheLayer_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := BeCacheLayer().Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+
+	// Test nil layer
+	var nilLayer *bptest.LayerResult
+	_, err = BeCacheLayer().Match(nilLayer)
+	g.Expect(err).To(HaveOccurred())
+}
+
+func TestHaveMetadata(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+		layer.Metadata = map[string]any{
+			"version": "17",
+			"vendor":  "Eclipse Adoptium",
+		}
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	// Check key exists
+	g.Expect(layer).To(HaveMetadata("version"))
+	g.Expect(layer).To(HaveMetadata("vendor"))
+	g.Expect(layer).NotTo(HaveMetadata("nonexistent"))
+
+	// Check key with value
+	g.Expect(layer).To(HaveMetadata("version", "17"))
+	g.Expect(layer).NotTo(HaveMetadata("version", "11"))
+}
+
+func TestHaveMetadata_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+		layer.Metadata = map[string]any{
+			"version": "17",
+		}
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	// Test failure message for missing key
+	matcher := HaveMetadata("nonexistent")
+	matcher.Match(layer)
+	msg := matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("nonexistent"))
+	g.Expect(msg).To(ContainSubstring("does not"))
+
+	// Test failure message for wrong value
+	matcher = HaveMetadata("version", "11")
+	matcher.Match(layer)
+	msg = matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("11"))
+	g.Expect(msg).To(ContainSubstring("17"))
+
+	// Test negated failure message (key only)
+	matcher = HaveMetadata("version")
+	matcher.Match(layer)
+	msg = matcher.NegatedFailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("not to have metadata"))
+
+	// Test negated failure message (key with value)
+	matcher = HaveMetadata("version", "17")
+	matcher.Match(layer)
+	msg = matcher.NegatedFailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("not to have metadata"))
+	g.Expect(msg).To(ContainSubstring("17"))
+}
+
+func TestHaveMetadata_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := HaveMetadata("key").Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+
+	// Test nil layer
+	var nilLayer *bptest.LayerResult
+	_, err = HaveMetadata("key").Match(nilLayer)
 	g.Expect(err).To(HaveOccurred())
 }
