@@ -190,6 +190,30 @@
 //		}
 //	}
 //
+// # Dependency Caching
+//
+// When testing buildpacks that download dependencies, use WithBuildpackDependencyCache
+// to point the buildpack's dependency cache to a local test fixtures directory:
+//
+//	func TestBuild_WithDependencyCache(t *testing.T) {
+//		testdataAbs, _ := filepath.Abs("testdata")
+//
+//		result := bptest.NewBuildTest().
+//			WithBuildpackDependencyCache(testdataAbs).
+//			WithPlanEntry("jdk", nil).
+//			ExecuteT(t, myBuilder.Build)
+//
+//		if !result.Succeeded() {
+//			t.Fatalf("build failed: %v", result.Error())
+//		}
+//	}
+//
+// You can also add arbitrary files to the buildpack directory with WithBuildpackFile:
+//
+//	result := bptest.NewBuildTest().
+//		WithBuildpackFileString("config/settings.json", `{"debug": true}`).
+//		ExecuteT(t, myBuilder.Build)
+//
 // # Gomega Matchers
 //
 // The matchers subpackage provides custom Gomega matchers for more expressive assertions.

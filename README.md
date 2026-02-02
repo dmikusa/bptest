@@ -338,6 +338,44 @@ func TestBuild_WithTarget(t *testing.T) {
 }
 ```
 
+### Dependency Caching with Symlinks
+
+When testing buildpacks that download dependencies, you can use `WithBuildpackDependencyCache` to point the buildpack's dependency cache to a local test fixtures directory. This allows your tests to use mock dependencies instead of downloading from the internet:
+
+```go
+func TestBuild_WithDependencyCache(t *testing.T) {
+    // Get absolute path to testdata directory containing mock dependencies
+    testdataAbs, err := filepath.Abs("testdata")
+    if err != nil {
+        t.Fatalf("failed to get absolute path: %v", err)
+    }
+
+    result := bptest.NewBuildTest().
+        WithBuildpackDependencyCache(testdataAbs).
+        WithPlanEntry("jdk", nil).
+        ExecuteT(t, myBuilder.Build)
+
+    if !result.Succeeded() {
+        t.Fatalf("build failed: %v", result.Error())
+    }
+}
+```
+
+You can also add arbitrary files to the buildpack directory:
+
+```go
+func TestBuild_WithBuildpackConfig(t *testing.T) {
+    result := bptest.NewBuildTest().
+        WithBuildpackFileString("config/settings.json", `{"debug": true}`).
+        WithPlanEntry("jdk", nil).
+        ExecuteT(t, myBuilder.Build)
+
+    if !result.Succeeded() {
+        t.Fatalf("build failed: %v", result.Error())
+    }
+}
+```
+
 ### Gomega Matchers
 
 The `matchers` subpackage provides custom [Gomega](https://onsi.github.io/gomega/) matchers for more expressive assertions.

@@ -991,3 +991,207 @@ func TestDetectTest_WithDependencyMetadata(t *testing.T) {
 		t.Error("expected detect to pass")
 	}
 }
+
+func TestBuildTest_WithEnv(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		// Check that environment variable is set
+		if os.Getenv("JAVA_HOME") != "/layers/jdk" {
+			t.Errorf("expected JAVA_HOME=/layers/jdk, got %s", os.Getenv("JAVA_HOME"))
+		}
+		if os.Getenv("BPTEST_VAR") != "test_value" {
+			t.Errorf("expected BPTEST_VAR=test_value, got %s", os.Getenv("BPTEST_VAR"))
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithEnv("JAVA_HOME", "/layers/jdk").
+		WithEnv("BPTEST_VAR", "test_value").
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+
+	// Verify env vars are cleaned up after execution
+	if os.Getenv("BPTEST_VAR") != "" {
+		t.Error("expected BPTEST_VAR to be unset after test")
+	}
+}
+
+func TestDetectTest_WithEnv(t *testing.T) {
+	detector := func(ctx libcnb.DetectContext) (libcnb.DetectResult, error) {
+		// Check that environment variable is set
+		if os.Getenv("JAVA_HOME") != "/layers/jdk" {
+			t.Errorf("expected JAVA_HOME=/layers/jdk, got %s", os.Getenv("JAVA_HOME"))
+		}
+		return libcnb.DetectResult{Pass: true}, nil
+	}
+
+	result := bptest.NewDetectTest().
+		WithEnv("JAVA_HOME", "/layers/jdk").
+		ExecuteT(t, detector)
+
+	if !result.Passed() {
+		t.Error("expected detect to pass")
+	}
+}
+
+func TestBuildTest_WithBuildpackFile(t *testing.T) {
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		// Check that the buildpack file exists
+		content, err := os.ReadFile(filepath.Join(ctx.Buildpack.Path, "config", "settings.json"))
+		if err != nil {
+			t.Errorf("failed to read buildpack file: %v", err)
+		}
+		if string(content) != `{"key": "value"}` {
+			t.Errorf("unexpected content: %s", string(content))
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithBuildpackFileString("config/settings.json", `{"key": "value"}`).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+}
+
+func TestBuildTest_WithBuildpackSymlink(t *testing.T) {
+	// Create a temp directory to serve as the symlink target
+	targetDir, err := os.MkdirTemp("", "bptest-target-")
+	if err != nil {
+		t.Fatalf("failed to create target dir: %v", err)
+	}
+	defer os.RemoveAll(targetDir)
+
+	// Create a file in the target directory
+	if err := os.WriteFile(filepath.Join(targetDir, "dependency.tgz"), []byte("mock dependency"), 0644); err != nil {
+		t.Fatalf("failed to write target file: %v", err)
+	}
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		// Check that the symlink exists and points to the correct target
+		symlinkPath := filepath.Join(ctx.Buildpack.Path, "dependencies")
+
+		// Read the symlink
+		target, err := os.Readlink(symlinkPath)
+		if err != nil {
+			t.Errorf("failed to read symlink: %v", err)
+		}
+		if target != targetDir {
+			t.Errorf("symlink target = %s, want %s", target, targetDir)
+		}
+
+		// Check that we can read files through the symlink
+		content, err := os.ReadFile(filepath.Join(symlinkPath, "dependency.tgz"))
+		if err != nil {
+			t.Errorf("failed to read through symlink: %v", err)
+		}
+		if string(content) != "mock dependency" {
+			t.Errorf("unexpected content through symlink: %s", string(content))
+		}
+
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithBuildpackSymlink("dependencies", targetDir).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+}
+
+func TestDetectTest_WithBuildpackFile(t *testing.T) {
+	detector := func(ctx libcnb.DetectContext) (libcnb.DetectResult, error) {
+		// Check that the buildpack file exists
+		content, err := os.ReadFile(filepath.Join(ctx.Buildpack.Path, "config.yaml"))
+		if err != nil {
+			t.Errorf("failed to read buildpack file: %v", err)
+		}
+		if string(content) != "enabled: true" {
+			t.Errorf("unexpected content: %s", string(content))
+		}
+		return libcnb.DetectResult{Pass: true}, nil
+	}
+
+	result := bptest.NewDetectTest().
+		WithBuildpackFileString("config.yaml", "enabled: true").
+		ExecuteT(t, detector)
+
+	if !result.Passed() {
+		t.Error("expected detect to pass")
+	}
+}
+
+func TestBuildTest_WithBuildpackDependencyCache(t *testing.T) {
+	// Create a temp directory to serve as the dependency cache
+	targetDir, err := os.MkdirTemp("", "bptest-deps-")
+	if err != nil {
+		t.Fatalf("failed to create target dir: %v", err)
+	}
+	defer os.RemoveAll(targetDir)
+
+	// Create a mock dependency file
+	if err := os.WriteFile(filepath.Join(targetDir, "jdk-17.tar.gz"), []byte("mock jdk"), 0644); err != nil {
+		t.Fatalf("failed to write target file: %v", err)
+	}
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		// Verify the dependencies symlink exists
+		content, err := os.ReadFile(filepath.Join(ctx.Buildpack.Path, "dependencies", "jdk-17.tar.gz"))
+		if err != nil {
+			t.Errorf("failed to read through dependencies symlink: %v", err)
+		}
+		if string(content) != "mock jdk" {
+			t.Errorf("unexpected content: %s", string(content))
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTest().
+		WithBuildpackDependencyCache(targetDir).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+}
+
+func TestDetectTest_WithBuildpackSymlink(t *testing.T) {
+	// Create a temp directory to serve as the symlink target
+	targetDir, err := os.MkdirTemp("", "bptest-target-")
+	if err != nil {
+		t.Fatalf("failed to create target dir: %v", err)
+	}
+	defer os.RemoveAll(targetDir)
+
+	// Create a file in the target directory
+	if err := os.WriteFile(filepath.Join(targetDir, "cached-file.txt"), []byte("cached content"), 0644); err != nil {
+		t.Fatalf("failed to write target file: %v", err)
+	}
+
+	detector := func(ctx libcnb.DetectContext) (libcnb.DetectResult, error) {
+		// Check that we can read files through the symlink
+		content, err := os.ReadFile(filepath.Join(ctx.Buildpack.Path, "cache", "cached-file.txt"))
+		if err != nil {
+			t.Errorf("failed to read through symlink: %v", err)
+		}
+		if string(content) != "cached content" {
+			t.Errorf("unexpected content through symlink: %s", string(content))
+		}
+		return libcnb.DetectResult{Pass: true}, nil
+	}
+
+	result := bptest.NewDetectTest().
+		WithBuildpackSymlink("cache", targetDir).
+		ExecuteT(t, detector)
+
+	if !result.Passed() {
+		t.Error("expected detect to pass")
+	}
+}

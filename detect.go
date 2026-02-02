@@ -30,23 +30,29 @@ import (
 
 // DetectTest configures and executes buildpack detect tests.
 type DetectTest struct {
-	appFiles       map[string][]byte
-	buildpack      BuildpackConfig
-	configurations []ConfigurationMetadata
-	dependencies   []DependencyMetadata
-	platformEnv    map[string]string
-	bindings       []Binding
-	stackID        string
-	target         *TargetInfo
-	dirManager     *testdir.Manager
-	paths          TestPaths
+	appFiles          map[string][]byte
+	buildpack         BuildpackConfig
+	buildpackFiles    map[string][]byte
+	buildpackSymlinks map[string]string
+	configurations    []ConfigurationMetadata
+	dependencies      []DependencyMetadata
+	platformEnv       map[string]string
+	env               map[string]string
+	bindings          []Binding
+	stackID           string
+	target            *TargetInfo
+	dirManager        *testdir.Manager
+	paths             TestPaths
 }
 
 // NewDetectTest creates a new DetectTest with default values.
 func NewDetectTest() *DetectTest {
 	return &DetectTest{
-		appFiles:    make(map[string][]byte),
-		platformEnv: make(map[string]string),
+		appFiles:          make(map[string][]byte),
+		buildpackFiles:    make(map[string][]byte),
+		buildpackSymlinks: make(map[string]string),
+		platformEnv:       make(map[string]string),
+		env:               make(map[string]string),
 		buildpack: BuildpackConfig{
 			API:     "0.8",
 			ID:      "test/buildpack",
@@ -65,6 +71,33 @@ func (d *DetectTest) WithAppFile(path string, content []byte) *DetectTest {
 // WithAppFileString adds a file to the application directory with string content.
 func (d *DetectTest) WithAppFileString(path, content string) *DetectTest {
 	return d.WithAppFile(path, []byte(content))
+}
+
+// WithBuildpackFile adds a file to the buildpack directory.
+func (d *DetectTest) WithBuildpackFile(path string, content []byte) *DetectTest {
+	d.buildpackFiles[path] = content
+	return d
+}
+
+// WithBuildpackFileString adds a file to the buildpack directory with string content.
+func (d *DetectTest) WithBuildpackFileString(path, content string) *DetectTest {
+	return d.WithBuildpackFile(path, []byte(content))
+}
+
+// WithBuildpackSymlink creates a symlink in the buildpack directory.
+// The relativePath is relative to the buildpack directory, and targetPath
+// is the absolute path that the symlink will point to.
+// This is useful for setting up dependency caches that point to test fixtures.
+func (d *DetectTest) WithBuildpackSymlink(relativePath, targetPath string) *DetectTest {
+	d.buildpackSymlinks[relativePath] = targetPath
+	return d
+}
+
+// WithBuildpackDependencyCache creates a symlink from the buildpack's "dependencies"
+// directory to the specified target path. This is a convenience method for the common
+// case of pointing the dependency cache to a test fixtures directory.
+func (d *DetectTest) WithBuildpackDependencyCache(targetPath string) *DetectTest {
+	return d.WithBuildpackSymlink("dependencies", targetPath)
 }
 
 // WithBuildpack sets the buildpack configuration.
@@ -109,6 +142,13 @@ func (d *DetectTest) WithDependencyMetadata(dep DependencyMetadata) *DetectTest 
 	return d
 }
 
+// WithEnv sets an environment variable for the detect function.
+// This simulates environment variables that might be set by previous buildpacks.
+func (d *DetectTest) WithEnv(key, value string) *DetectTest {
+	d.env[key] = value
+	return d
+}
+
 // Paths returns the test directory paths after Execute has been called.
 func (d *DetectTest) Paths() TestPaths {
 	return d.paths
@@ -120,6 +160,10 @@ func (d *DetectTest) Execute(detect libcnb.DetectFunc) (*DetectResult, error) {
 		return nil, err
 	}
 
+	// Set environment variables and capture originals for restoration
+	origEnv := d.setEnv()
+	defer d.restoreEnv(origEnv)
+
 	ctx := d.buildContext()
 	result, err := detect(ctx)
 
@@ -127,6 +171,31 @@ func (d *DetectTest) Execute(detect libcnb.DetectFunc) (*DetectResult, error) {
 		result: result,
 		err:    err,
 	}, nil
+}
+
+// setEnv sets environment variables and returns original values for restoration.
+func (d *DetectTest) setEnv() map[string]*string {
+	origEnv := make(map[string]*string)
+	for key, value := range d.env {
+		if orig, exists := os.LookupEnv(key); exists {
+			origEnv[key] = &orig
+		} else {
+			origEnv[key] = nil
+		}
+		os.Setenv(key, value)
+	}
+	return origEnv
+}
+
+// restoreEnv restores environment variables to their original values.
+func (d *DetectTest) restoreEnv(origEnv map[string]*string) {
+	for key, value := range origEnv {
+		if value == nil {
+			os.Unsetenv(key)
+		} else {
+			os.Setenv(key, *value)
+		}
+	}
 }
 
 // ExecuteT runs the detect function with automatic cleanup on test completion.
@@ -196,6 +265,25 @@ func (d *DetectTest) setup() error {
 	}
 	if err := d.dirManager.WriteFile(bpDir, "buildpack.toml", bpTOML); err != nil {
 		return err
+	}
+
+	// Write additional buildpack files
+	for path, content := range d.buildpackFiles {
+		if err := d.dirManager.WriteFile(bpDir, path, content); err != nil {
+			return err
+		}
+	}
+
+	// Create buildpack symlinks
+	for relativePath, targetPath := range d.buildpackSymlinks {
+		symlinkPath := filepath.Join(bpDir, relativePath)
+		// Ensure parent directory exists
+		if err := os.MkdirAll(filepath.Dir(symlinkPath), 0755); err != nil {
+			return err
+		}
+		if err := os.Symlink(targetPath, symlinkPath); err != nil {
+			return err
+		}
 	}
 
 	// Create platform directory

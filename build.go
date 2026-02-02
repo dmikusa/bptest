@@ -33,9 +33,12 @@ import (
 type BuildTest struct {
 	appFiles           map[string][]byte
 	buildpack          BuildpackConfig
+	buildpackFiles     map[string][]byte
+	buildpackSymlinks  map[string]string
 	configurations     []ConfigurationMetadata
 	dependencies       []DependencyMetadata
 	platformEnv        map[string]string
+	env                map[string]string
 	bindings           []Binding
 	planEntries        []libcnb.BuildpackPlanEntry
 	existingLayers     map[string]*LayerConfig
@@ -49,9 +52,12 @@ type BuildTest struct {
 // NewBuildTest creates a new BuildTest with default values.
 func NewBuildTest() *BuildTest {
 	return &BuildTest{
-		appFiles:       make(map[string][]byte),
-		platformEnv:    make(map[string]string),
-		existingLayers: make(map[string]*LayerConfig),
+		appFiles:          make(map[string][]byte),
+		buildpackFiles:    make(map[string][]byte),
+		buildpackSymlinks: make(map[string]string),
+		platformEnv:       make(map[string]string),
+		env:               make(map[string]string),
+		existingLayers:    make(map[string]*LayerConfig),
 		buildpack: BuildpackConfig{
 			API:     "0.8",
 			ID:      "test/buildpack",
@@ -76,6 +82,33 @@ func (b *BuildTest) WithAppFileString(path, content string) *BuildTest {
 func (b *BuildTest) WithBuildpack(config BuildpackConfig) *BuildTest {
 	b.buildpack = config
 	return b
+}
+
+// WithBuildpackFile adds a file to the buildpack directory.
+func (b *BuildTest) WithBuildpackFile(path string, content []byte) *BuildTest {
+	b.buildpackFiles[path] = content
+	return b
+}
+
+// WithBuildpackFileString adds a file to the buildpack directory with string content.
+func (b *BuildTest) WithBuildpackFileString(path, content string) *BuildTest {
+	return b.WithBuildpackFile(path, []byte(content))
+}
+
+// WithBuildpackSymlink creates a symlink in the buildpack directory.
+// The relativePath is relative to the buildpack directory, and targetPath
+// is the absolute path that the symlink will point to.
+// This is useful for setting up dependency caches that point to test fixtures.
+func (b *BuildTest) WithBuildpackSymlink(relativePath, targetPath string) *BuildTest {
+	b.buildpackSymlinks[relativePath] = targetPath
+	return b
+}
+
+// WithBuildpackDependencyCache creates a symlink from the buildpack's "dependencies"
+// directory to the specified target path. This is a convenience method for the common
+// case of pointing the dependency cache to a test fixtures directory.
+func (b *BuildTest) WithBuildpackDependencyCache(targetPath string) *BuildTest {
+	return b.WithBuildpackSymlink("dependencies", targetPath)
 }
 
 // WithPlatformEnv sets a platform environment variable.
@@ -141,6 +174,13 @@ func (b *BuildTest) WithDependencyMetadata(dep DependencyMetadata) *BuildTest {
 	return b
 }
 
+// WithEnv sets an environment variable for the build function.
+// This simulates environment variables that might be set by previous buildpacks.
+func (b *BuildTest) WithEnv(key, value string) *BuildTest {
+	b.env[key] = value
+	return b
+}
+
 // Paths returns the test directory paths after Execute has been called.
 func (b *BuildTest) Paths() TestPaths {
 	return b.paths
@@ -152,6 +192,10 @@ func (b *BuildTest) Execute(build libcnb.BuildFunc) (*BuildResult, error) {
 		return nil, err
 	}
 
+	// Set environment variables and capture originals for restoration
+	origEnv := b.setEnv()
+	defer b.restoreEnv(origEnv)
+
 	ctx := b.buildContext()
 	result, err := build(ctx)
 
@@ -160,6 +204,31 @@ func (b *BuildTest) Execute(build libcnb.BuildFunc) (*BuildResult, error) {
 		err:       err,
 		layersDir: b.paths.LayersDir,
 	}, nil
+}
+
+// setEnv sets environment variables and returns original values for restoration.
+func (b *BuildTest) setEnv() map[string]*string {
+	origEnv := make(map[string]*string)
+	for key, value := range b.env {
+		if orig, exists := os.LookupEnv(key); exists {
+			origEnv[key] = &orig
+		} else {
+			origEnv[key] = nil
+		}
+		os.Setenv(key, value)
+	}
+	return origEnv
+}
+
+// restoreEnv restores environment variables to their original values.
+func (b *BuildTest) restoreEnv(origEnv map[string]*string) {
+	for key, value := range origEnv {
+		if value == nil {
+			os.Unsetenv(key)
+		} else {
+			os.Setenv(key, *value)
+		}
+	}
 }
 
 // ExecuteT runs the build function with automatic cleanup on test completion.
@@ -229,6 +298,25 @@ func (b *BuildTest) setup() error {
 	}
 	if err := b.dirManager.WriteFile(bpDir, "buildpack.toml", bpTOML); err != nil {
 		return err
+	}
+
+	// Write additional buildpack files
+	for path, content := range b.buildpackFiles {
+		if err := b.dirManager.WriteFile(bpDir, path, content); err != nil {
+			return err
+		}
+	}
+
+	// Create buildpack symlinks
+	for relativePath, targetPath := range b.buildpackSymlinks {
+		symlinkPath := filepath.Join(bpDir, relativePath)
+		// Ensure parent directory exists
+		if err := os.MkdirAll(filepath.Dir(symlinkPath), 0755); err != nil {
+			return err
+		}
+		if err := os.Symlink(targetPath, symlinkPath); err != nil {
+			return err
+		}
 	}
 
 	// Create platform directory
