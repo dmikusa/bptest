@@ -33,6 +33,7 @@ import (
 type BuildTest struct {
 	appFiles           map[string][]byte
 	buildpack          BuildpackConfig
+	buildpackTOMLPath  string // If set, copy this file instead of generating buildpack.toml
 	buildpackFiles     map[string][]byte
 	buildpackSymlinks  map[string]string
 	configurations     []ConfigurationMetadata
@@ -64,6 +65,29 @@ func NewBuildTest() *BuildTest {
 			Version: "0.0.1",
 		},
 		dirManager: testdir.NewManager(),
+	}
+}
+
+// NewBuildTestFromBuildpack creates a BuildTest using an actual buildpack.toml file.
+// The buildpackTOMLPath should be the path to the buildpack.toml file.
+// This is useful for integration-style tests where you want to test with the real
+// buildpack configuration rather than synthetic test data.
+//
+// The buildpack.toml is copied to a temporary directory, so WithBuildpackFile,
+// WithBuildpackSymlink, and WithBuildpackDependencyCache still work as expected.
+//
+// Note: WithBuildpack, WithConfigurationMetadata, and WithDependencyMetadata
+// have no effect when using this constructor since the real buildpack.toml is used.
+func NewBuildTestFromBuildpack(buildpackTOMLPath string) *BuildTest {
+	return &BuildTest{
+		appFiles:          make(map[string][]byte),
+		buildpackTOMLPath: buildpackTOMLPath,
+		buildpackFiles:    make(map[string][]byte),
+		buildpackSymlinks: make(map[string]string),
+		platformEnv:       make(map[string]string),
+		env:               make(map[string]string),
+		existingLayers:    make(map[string]*LayerConfig),
+		dirManager:        testdir.NewManager(),
 	}
 }
 
@@ -270,34 +294,46 @@ func (b *BuildTest) setup() error {
 	}
 	b.paths.BuildpackDir = bpDir
 
-	// Merge configurations and dependencies into buildpack metadata
-	if len(b.configurations) > 0 || len(b.dependencies) > 0 {
-		if b.buildpack.Metadata == nil {
-			b.buildpack.Metadata = make(map[string]any)
+	// Write buildpack.toml - either copy from file or generate from config
+	if b.buildpackTOMLPath != "" {
+		// Copy the existing buildpack.toml file
+		content, err := os.ReadFile(b.buildpackTOMLPath)
+		if err != nil {
+			return err
 		}
-		if len(b.configurations) > 0 {
-			var configs []map[string]any
-			for _, c := range b.configurations {
-				configs = append(configs, c.toMap())
+		if err := b.dirManager.WriteFile(bpDir, "buildpack.toml", content); err != nil {
+			return err
+		}
+	} else {
+		// Merge configurations and dependencies into buildpack metadata
+		if len(b.configurations) > 0 || len(b.dependencies) > 0 {
+			if b.buildpack.Metadata == nil {
+				b.buildpack.Metadata = make(map[string]any)
 			}
-			b.buildpack.Metadata["configurations"] = configs
-		}
-		if len(b.dependencies) > 0 {
-			var deps []map[string]any
-			for _, d := range b.dependencies {
-				deps = append(deps, d.toMap())
+			if len(b.configurations) > 0 {
+				var configs []map[string]any
+				for _, c := range b.configurations {
+					configs = append(configs, c.toMap())
+				}
+				b.buildpack.Metadata["configurations"] = configs
 			}
-			b.buildpack.Metadata["dependencies"] = deps
+			if len(b.dependencies) > 0 {
+				var deps []map[string]any
+				for _, d := range b.dependencies {
+					deps = append(deps, d.toMap())
+				}
+				b.buildpack.Metadata["dependencies"] = deps
+			}
 		}
-	}
 
-	// Write buildpack.toml
-	bpTOML, err := b.buildpack.ToTOML()
-	if err != nil {
-		return err
-	}
-	if err := b.dirManager.WriteFile(bpDir, "buildpack.toml", bpTOML); err != nil {
-		return err
+		// Write buildpack.toml
+		bpTOML, err := b.buildpack.ToTOML()
+		if err != nil {
+			return err
+		}
+		if err := b.dirManager.WriteFile(bpDir, "buildpack.toml", bpTOML); err != nil {
+			return err
+		}
 	}
 
 	// Write additional buildpack files
@@ -445,10 +481,10 @@ func (b *BuildTest) buildContext() libcnb.BuildContext {
 	buildpack.Path = b.paths.BuildpackDir
 
 	ctx := libcnb.BuildContext{
-		ApplicationPath: b.paths.AppDir,
-		Buildpack:       buildpack,
-		Layers:          libcnb.Layers{Path: b.paths.LayersDir},
-		Logger:          log.NewDiscard(),
+		ApplicationPath:    b.paths.AppDir,
+		Buildpack:          buildpack,
+		Layers:             libcnb.Layers{Path: b.paths.LayersDir},
+		Logger:             log.NewDiscard(),
 		PersistentMetadata: b.persistentMetadata,
 		Plan: libcnb.BuildpackPlan{
 			Entries: b.planEntries,

@@ -32,6 +32,7 @@ import (
 type DetectTest struct {
 	appFiles          map[string][]byte
 	buildpack         BuildpackConfig
+	buildpackTOMLPath string // If set, copy this file instead of generating buildpack.toml
 	buildpackFiles    map[string][]byte
 	buildpackSymlinks map[string]string
 	configurations    []ConfigurationMetadata
@@ -59,6 +60,28 @@ func NewDetectTest() *DetectTest {
 			Version: "0.0.1",
 		},
 		dirManager: testdir.NewManager(),
+	}
+}
+
+// NewDetectTestFromBuildpack creates a DetectTest using an actual buildpack.toml file.
+// The buildpackTOMLPath should be the path to the buildpack.toml file.
+// This is useful for integration-style tests where you want to test with the real
+// buildpack configuration rather than synthetic test data.
+//
+// The buildpack.toml is copied to a temporary directory, so WithBuildpackFile,
+// WithBuildpackSymlink, and WithBuildpackDependencyCache still work as expected.
+//
+// Note: WithBuildpack, WithConfigurationMetadata, and WithDependencyMetadata
+// have no effect when using this constructor since the real buildpack.toml is used.
+func NewDetectTestFromBuildpack(buildpackTOMLPath string) *DetectTest {
+	return &DetectTest{
+		appFiles:          make(map[string][]byte),
+		buildpackTOMLPath: buildpackTOMLPath,
+		buildpackFiles:    make(map[string][]byte),
+		buildpackSymlinks: make(map[string]string),
+		platformEnv:       make(map[string]string),
+		env:               make(map[string]string),
+		dirManager:        testdir.NewManager(),
 	}
 }
 
@@ -237,34 +260,46 @@ func (d *DetectTest) setup() error {
 	}
 	d.paths.BuildpackDir = bpDir
 
-	// Merge configurations and dependencies into buildpack metadata
-	if len(d.configurations) > 0 || len(d.dependencies) > 0 {
-		if d.buildpack.Metadata == nil {
-			d.buildpack.Metadata = make(map[string]any)
+	// Write buildpack.toml - either copy from file or generate from config
+	if d.buildpackTOMLPath != "" {
+		// Copy the existing buildpack.toml file
+		content, err := os.ReadFile(d.buildpackTOMLPath)
+		if err != nil {
+			return err
 		}
-		if len(d.configurations) > 0 {
-			var configs []map[string]any
-			for _, c := range d.configurations {
-				configs = append(configs, c.toMap())
+		if err := d.dirManager.WriteFile(bpDir, "buildpack.toml", content); err != nil {
+			return err
+		}
+	} else {
+		// Merge configurations and dependencies into buildpack metadata
+		if len(d.configurations) > 0 || len(d.dependencies) > 0 {
+			if d.buildpack.Metadata == nil {
+				d.buildpack.Metadata = make(map[string]any)
 			}
-			d.buildpack.Metadata["configurations"] = configs
-		}
-		if len(d.dependencies) > 0 {
-			var deps []map[string]any
-			for _, dep := range d.dependencies {
-				deps = append(deps, dep.toMap())
+			if len(d.configurations) > 0 {
+				var configs []map[string]any
+				for _, c := range d.configurations {
+					configs = append(configs, c.toMap())
+				}
+				d.buildpack.Metadata["configurations"] = configs
 			}
-			d.buildpack.Metadata["dependencies"] = deps
+			if len(d.dependencies) > 0 {
+				var deps []map[string]any
+				for _, dep := range d.dependencies {
+					deps = append(deps, dep.toMap())
+				}
+				d.buildpack.Metadata["dependencies"] = deps
+			}
 		}
-	}
 
-	// Write buildpack.toml
-	bpTOML, err := d.buildpack.ToTOML()
-	if err != nil {
-		return err
-	}
-	if err := d.dirManager.WriteFile(bpDir, "buildpack.toml", bpTOML); err != nil {
-		return err
+		// Write buildpack.toml
+		bpTOML, err := d.buildpack.ToTOML()
+		if err != nil {
+			return err
+		}
+		if err := d.dirManager.WriteFile(bpDir, "buildpack.toml", bpTOML); err != nil {
+			return err
+		}
 	}
 
 	// Write additional buildpack files

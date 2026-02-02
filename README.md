@@ -338,6 +338,25 @@ func TestBuild_WithTarget(t *testing.T) {
 }
 ```
 
+### Integration Tests with Real Buildpack Configuration
+
+For integration-style tests that use your actual `buildpack.toml` configuration:
+
+```go
+func TestBuild_Integration(t *testing.T) {
+    result := bptest.NewBuildTestFromBuildpack("buildpack.toml").
+        WithAppFileString("pom.xml", "<project/>").
+        WithPlanEntry("jdk", nil).
+        ExecuteT(t, myBuilder.Build)
+
+    if !result.Succeeded() {
+        t.Fatalf("build failed: %v", result.Error())
+    }
+}
+```
+
+This copies your real `buildpack.toml` to a temporary directory, so you can still use `WithBuildpackFile`, `WithBuildpackSymlink`, and `WithBuildpackDependencyCache` to add test fixtures.
+
 ### Dependency Caching with Symlinks
 
 When testing buildpacks that download dependencies, you can use `WithBuildpackDependencyCache` to point the buildpack's dependency cache to a local test fixtures directory. This allows your tests to use mock dependencies instead of downloading from the internet:

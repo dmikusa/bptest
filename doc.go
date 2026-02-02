@@ -190,6 +190,21 @@
 //		}
 //	}
 //
+// # Integration Tests
+//
+// For integration-style tests that use your actual buildpack.toml configuration:
+//
+//	func TestBuild_Integration(t *testing.T) {
+//		result := bptest.NewBuildTestFromBuildpack("buildpack.toml").
+//			WithAppFileString("pom.xml", "<project/>").
+//			WithPlanEntry("jdk", nil).
+//			ExecuteT(t, myBuilder.Build)
+//
+//		if !result.Succeeded() {
+//			t.Fatalf("build failed: %v", result.Error())
+//		}
+//	}
+//
 // # Dependency Caching
 //
 // When testing buildpacks that download dependencies, use WithBuildpackDependencyCache

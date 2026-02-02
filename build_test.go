@@ -1195,3 +1195,144 @@ func TestDetectTest_WithBuildpackSymlink(t *testing.T) {
 		t.Error("expected detect to pass")
 	}
 }
+
+func TestBuildTest_FromBuildpack(t *testing.T) {
+	// Create a temp buildpack.toml file
+	tmpDir, err := os.MkdirTemp("", "bptest-toml-")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	buildpackTOML := `api = "0.8"
+
+[buildpack]
+id = "integration/test-buildpack"
+name = "Integration Test Buildpack"
+version = "1.2.3"
+
+[[buildpack.licenses]]
+type = "Apache-2.0"
+
+[metadata]
+include-files = ["buildpack.toml"]
+
+[[metadata.configurations]]
+name = "BP_TEST_CONFIG"
+description = "A test configuration"
+default = "default-value"
+build = true
+`
+	tomlPath := filepath.Join(tmpDir, "buildpack.toml")
+	if err := os.WriteFile(tomlPath, []byte(buildpackTOML), 0644); err != nil {
+		t.Fatalf("failed to write buildpack.toml: %v", err)
+	}
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		// Verify the buildpack info was loaded from the real file
+		if ctx.Buildpack.Info.ID != "integration/test-buildpack" {
+			t.Errorf("expected buildpack ID integration/test-buildpack, got %s", ctx.Buildpack.Info.ID)
+		}
+		if ctx.Buildpack.Info.Version != "1.2.3" {
+			t.Errorf("expected version 1.2.3, got %s", ctx.Buildpack.Info.Version)
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTestFromBuildpack(tomlPath).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+}
+
+func TestBuildTest_FromBuildpack_WithDependencyCache(t *testing.T) {
+	// Create a temp buildpack.toml file
+	tmpDir, err := os.MkdirTemp("", "bptest-toml-")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	buildpackTOML := `api = "0.8"
+
+[buildpack]
+id = "integration/test-buildpack"
+version = "1.0.0"
+`
+	tomlPath := filepath.Join(tmpDir, "buildpack.toml")
+	if err := os.WriteFile(tomlPath, []byte(buildpackTOML), 0644); err != nil {
+		t.Fatalf("failed to write buildpack.toml: %v", err)
+	}
+
+	// Create a dependency cache directory
+	cacheDir, err := os.MkdirTemp("", "bptest-cache-")
+	if err != nil {
+		t.Fatalf("failed to create cache dir: %v", err)
+	}
+	defer os.RemoveAll(cacheDir)
+
+	if err := os.WriteFile(filepath.Join(cacheDir, "dep.tar.gz"), []byte("mock dep"), 0644); err != nil {
+		t.Fatalf("failed to write mock dep: %v", err)
+	}
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		// Verify the dependency cache symlink works
+		content, err := os.ReadFile(filepath.Join(ctx.Buildpack.Path, "dependencies", "dep.tar.gz"))
+		if err != nil {
+			t.Errorf("failed to read through dependencies symlink: %v", err)
+		}
+		if string(content) != "mock dep" {
+			t.Errorf("unexpected content: %s", string(content))
+		}
+		return libcnb.NewBuildResult(), nil
+	}
+
+	result := bptest.NewBuildTestFromBuildpack(tomlPath).
+		WithBuildpackDependencyCache(cacheDir).
+		ExecuteT(t, builder)
+
+	if !result.Succeeded() {
+		t.Error("expected build to succeed")
+	}
+}
+
+func TestDetectTest_FromBuildpack(t *testing.T) {
+	// Create a temp buildpack.toml file
+	tmpDir, err := os.MkdirTemp("", "bptest-toml-")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	buildpackTOML := `api = "0.8"
+
+[buildpack]
+id = "integration/detect-test"
+name = "Integration Detect Test"
+version = "2.0.0"
+`
+	tomlPath := filepath.Join(tmpDir, "buildpack.toml")
+	if err := os.WriteFile(tomlPath, []byte(buildpackTOML), 0644); err != nil {
+		t.Fatalf("failed to write buildpack.toml: %v", err)
+	}
+
+	detector := func(ctx libcnb.DetectContext) (libcnb.DetectResult, error) {
+		// Verify the buildpack info was loaded from the real file
+		if ctx.Buildpack.Info.ID != "integration/detect-test" {
+			t.Errorf("expected buildpack ID integration/detect-test, got %s", ctx.Buildpack.Info.ID)
+		}
+		if ctx.Buildpack.Info.Version != "2.0.0" {
+			t.Errorf("expected version 2.0.0, got %s", ctx.Buildpack.Info.Version)
+		}
+		return libcnb.DetectResult{Pass: true}, nil
+	}
+
+	result := bptest.NewDetectTestFromBuildpack(tomlPath).
+		ExecuteT(t, detector)
+
+	if !result.Passed() {
+		t.Error("expected detect to pass")
+	}
+}
