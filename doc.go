@@ -285,6 +285,7 @@
 // Available matchers for LayerResult:
 //   - HaveFile(path) - check if file exists in layer
 //   - HaveFileWithContents(path, contents) - check file exists with exact contents
+//   - HaveFileWithPerms(path, perms) - check file exists with exact permissions (e.g., 0755)
 //   - BeBuildLayer() - check if layer is marked for build
 //   - BeLaunchLayer() - check if layer is marked for launch
 //   - BeCacheLayer() - check if layer is marked for caching

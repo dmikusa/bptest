@@ -865,6 +865,90 @@ func TestHaveFileWithContents_TypeErrors(t *testing.T) {
 	g.Expect(err).To(HaveOccurred())
 }
 
+func TestHaveFileWithPerms(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		// Create the layer directory and write files with specific permissions
+		if err := os.MkdirAll(layer.Path, 0755); err != nil {
+			return libcnb.BuildResult{}, err
+		}
+		if err := os.WriteFile(filepath.Join(layer.Path, "bin", "java"), []byte("#!/bin/bash"), 0755); err != nil {
+			os.MkdirAll(filepath.Join(layer.Path, "bin"), 0755)
+			os.WriteFile(filepath.Join(layer.Path, "bin", "java"), []byte("#!/bin/bash"), 0755)
+		}
+		if err := os.WriteFile(filepath.Join(layer.Path, "config.txt"), []byte("config"), 0644); err != nil {
+			return libcnb.BuildResult{}, err
+		}
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	g.Expect(layer).To(HaveFileWithPerms("bin/java", 0755))
+	g.Expect(layer).To(HaveFileWithPerms("config.txt", 0644))
+	g.Expect(layer).NotTo(HaveFileWithPerms("bin/java", 0644))
+	g.Expect(layer).NotTo(HaveFileWithPerms("nonexistent", 0755))
+}
+
+func TestHaveFileWithPerms_FailureMessages(t *testing.T) {
+	g := NewWithT(t)
+
+	builder := func(ctx libcnb.BuildContext) (libcnb.BuildResult, error) {
+		layer, _ := ctx.Layers.Layer("jdk")
+		layer.Build = true
+
+		// Create the layer directory and write file
+		os.MkdirAll(layer.Path, 0755)
+		os.WriteFile(filepath.Join(layer.Path, "script.sh"), []byte("#!/bin/bash"), 0755)
+
+		result := libcnb.NewBuildResult()
+		result.Layers = append(result.Layers, layer)
+		return result, nil
+	}
+
+	result := bptest.NewBuildTest().ExecuteT(t, builder)
+	layer := result.Layer("jdk")
+
+	// Test failure message for file not found
+	matcher := HaveFileWithPerms("nonexistent", 0755)
+	matcher.Match(layer)
+	msg := matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("does not exist"))
+
+	// Test failure message for wrong permissions
+	matcher = HaveFileWithPerms("script.sh", 0644)
+	matcher.Match(layer)
+	msg = matcher.FailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("0644"))
+	g.Expect(msg).To(ContainSubstring("0755"))
+
+	// Test negated failure message
+	matcher = HaveFileWithPerms("script.sh", 0755)
+	matcher.Match(layer)
+	msg = matcher.NegatedFailureMessage(layer)
+	g.Expect(msg).To(ContainSubstring("not to have permissions"))
+}
+
+func TestHaveFileWithPerms_TypeErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	_, err := HaveFileWithPerms("test", 0755).Match("wrong type")
+	g.Expect(err).To(HaveOccurred())
+
+	// Test nil layer
+	var nilLayer *bptest.LayerResult
+	_, err = HaveFileWithPerms("test", 0755).Match(nilLayer)
+	g.Expect(err).To(HaveOccurred())
+}
+
 func TestBeBuildLayer(t *testing.T) {
 	g := NewWithT(t)
 

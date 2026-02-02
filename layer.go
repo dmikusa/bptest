@@ -121,6 +121,16 @@ func (r *LayerResult) FileContentString(relativePath string) (string, error) {
 	return string(content), nil
 }
 
+// FileMode returns the file mode (permissions) of a file in the layer.
+func (r *LayerResult) FileMode(relativePath string) (os.FileMode, error) {
+	fullPath := filepath.Join(r.layer.Path, relativePath)
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return 0, err
+	}
+	return info.Mode(), nil
+}
+
 // BinFiles returns the list of files in the layer's bin directory.
 func (r *LayerResult) BinFiles() ([]string, error) {
 	return r.listDir("bin")

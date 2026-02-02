@@ -33,6 +33,7 @@ package matchers
 
 import (
 	"fmt"
+	"os"
 	"sort"
 
 	"github.com/onsi/gomega/types"
@@ -535,6 +536,54 @@ func (m *haveFileWithContentsMatcher) NegatedFailureMessage(actual any) string {
 	layer := actual.(*bptest.LayerResult)
 	return fmt.Sprintf("Expected layer %q file %q not to have contents %q, but it did",
 		layer.Name(), m.path, m.contents)
+}
+
+// HaveFileWithPerms returns a matcher that checks if a file exists with specific permissions.
+func HaveFileWithPerms(relativePath string, perms os.FileMode) types.GomegaMatcher {
+	return &haveFileWithPermsMatcher{path: relativePath, perms: perms}
+}
+
+type haveFileWithPermsMatcher struct {
+	path        string
+	perms       os.FileMode
+	actualPerms os.FileMode
+	fileExists  bool
+}
+
+func (m *haveFileWithPermsMatcher) Match(actual any) (bool, error) {
+	layer, ok := actual.(*bptest.LayerResult)
+	if !ok {
+		return false, fmt.Errorf("HaveFileWithPerms expects a *bptest.LayerResult, got %T", actual)
+	}
+	if layer == nil {
+		return false, fmt.Errorf("HaveFileWithPerms received nil layer")
+	}
+	m.fileExists = layer.FileExists(m.path)
+	if !m.fileExists {
+		return false, nil
+	}
+	mode, err := layer.FileMode(m.path)
+	if err != nil {
+		return false, err
+	}
+	m.actualPerms = mode.Perm()
+	return m.actualPerms == m.perms, nil
+}
+
+func (m *haveFileWithPermsMatcher) FailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	if !m.fileExists {
+		return fmt.Sprintf("Expected layer %q to have file %q with permissions %04o, but file does not exist",
+			layer.Name(), m.path, m.perms)
+	}
+	return fmt.Sprintf("Expected layer %q file %q to have permissions %04o, but was %04o",
+		layer.Name(), m.path, m.perms, m.actualPerms)
+}
+
+func (m *haveFileWithPermsMatcher) NegatedFailureMessage(actual any) string {
+	layer := actual.(*bptest.LayerResult)
+	return fmt.Sprintf("Expected layer %q file %q not to have permissions %04o, but it did",
+		layer.Name(), m.path, m.perms)
 }
 
 // BeBuildLayer returns a matcher that checks if a layer is marked for build.

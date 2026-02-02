@@ -465,6 +465,7 @@ func TestBuild_WithGomega(t *testing.T) {
 |---------|-------------|
 | `HaveFile(path)` | Check if file exists in layer |
 | `HaveFileWithContents(path, contents)` | Check file exists with exact contents |
+| `HaveFileWithPerms(path, perms)` | Check file exists with exact permissions (e.g., `0755`) |
 | `BeBuildLayer()` | Check if layer is marked for build |
 | `BeLaunchLayer()` | Check if layer is marked for launch |
 | `BeCacheLayer()` | Check if layer is marked for caching |
